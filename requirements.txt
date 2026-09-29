@@ -1,0 +1,9 @@
+pypdf
+python-docx
+reportlab
+langdetect
+pandas
+scikit-learn
+matplotlib
+pytest
+ipykernel
