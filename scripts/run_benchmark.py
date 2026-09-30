@@ -1,6 +1,6 @@
 # scripts/run_benchmark.py
 import json, statistics
-from app import db, search
+from app import db, search, hybrid
 from app.config import ROOT, REPORT_DIR, MIN_VECTOR_SCORE
 
 WS = "demo-workspace"
@@ -17,7 +17,8 @@ def first_rank(rows, rel):
     return None
 
 def evaluate(con, items, mode, strategy):
-    fn = search.vector_search if mode == "vector" else search.keyword_search
+    fn = {"keyword": search.keyword_search, "vector": search.vector_search,
+          "hybrid": hybrid.hybrid_search}[mode]
     ranks = [first_rank(fn(con, WS, it["q"], max(KS), strategy), it["relevant"]) for it in items]
     out = {f"recall@{k}": round(sum(1 for r in ranks if r and r <= k) / len(ranks), 3) for k in KS}
     out["mrr"] = round(sum(1 / r for r in ranks if r) / len(ranks), 3)
@@ -38,7 +39,7 @@ def main():
 
     results = {}
     print(f"{'config':<20}{'R@1':>7}{'R@3':>7}{'R@5':>7}{'MRR':>7}")
-    for mode in ("keyword", "vector"):
+    for mode in ("keyword", "vector", "hybrid"):
         for strat in ("structure", "fixed"):
             r = evaluate(con, ans, mode, strat)
             results[f"{mode}/{strat}"] = r
