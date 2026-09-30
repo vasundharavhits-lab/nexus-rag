@@ -7,3 +7,9 @@ scikit-learn
 matplotlib
 pytest
 ipykernel
+fastapi
+uvicorn[standard]
+psycopg[binary]
+python-dotenv
+python-multipart
+httpx

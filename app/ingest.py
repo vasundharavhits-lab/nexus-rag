@@ -1,4 +1,3 @@
-# app/ingest.py
 import hashlib, re, uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -6,7 +5,7 @@ from langdetect import detect, DetectorFactory
 from app.config import SUPPORTED
 from app.parsing import parse_markdown_text, docx_to_markdown, parse_pdf
 
-DetectorFactory.seed = 0        # reproducible language detection
+DetectorFactory.seed = 0
 NS = uuid.UUID("12345678-1234-5678-1234-567812345678")
 
 def extract_metadata(text: str) -> dict:
@@ -22,18 +21,19 @@ def detect_lang(text: str) -> str:
     except Exception:
         return "unknown"
 
-def ingest_file(path: Path):
+def ingest_file(path: Path, workspace_id: str = "default", original_name: str | None = None):
     raw = path.read_bytes()
-    stem, ext = path.stem, path.suffix.lower()
+    name = original_name or path.name
+    stem, ext = Path(name).stem, Path(name).suffix.lower()
     m = re.search(r"_v(\d+)$", stem)
     logical = re.sub(r"_v\d+$", "", stem)
     label = f"v{m.group(1)}" if m else "v1"
     chash = hashlib.sha256(raw).hexdigest()
 
     rec = {
-        "document_id": str(uuid.uuid5(NS, logical)),
-        "version_id": str(uuid.uuid5(NS, logical + chash)),
-        "logical_name": logical, "label": label, "filename": path.name,
+        "document_id": str(uuid.uuid5(NS, f"{workspace_id}:{logical}")),
+        "version_id": str(uuid.uuid5(NS, f"{workspace_id}:{logical}:{chash}")),
+        "logical_name": logical, "label": label, "filename": name,
         "source_uri": str(path), "file_type": ext.lstrip("."),
         "size_bytes": len(raw), "content_hash": chash,
         "ingested_at": datetime.now(timezone.utc).isoformat(),
@@ -61,7 +61,7 @@ def ingest_file(path: Path):
     })
     return rec, sections
 
-def ingest_directory(raw_dir: Path):
+def ingest_directory(raw_dir: Path, workspace_id: str = "default"):
     records, all_sections, unsupported = [], [], []
     for p in sorted(raw_dir.iterdir()):
         if not p.is_file():
@@ -69,7 +69,7 @@ def ingest_directory(raw_dir: Path):
         if p.suffix.lower() not in SUPPORTED:
             unsupported.append(p.name)
             continue
-        rec, secs = ingest_file(p)
+        rec, secs = ingest_file(p, workspace_id)
         records.append(rec)
         all_sections += [{**s, "version_id": rec["version_id"], "idx": i}
                          for i, s in enumerate(secs)]

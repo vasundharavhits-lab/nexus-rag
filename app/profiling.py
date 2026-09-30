@@ -1,4 +1,3 @@
-# app/profiling.py
 import json
 from datetime import datetime, timezone
 import pandas as pd
@@ -6,9 +5,16 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from app.config import NEAR_DUP_THRESHOLD, MIN_WORDS, REPORT_DIR
 
-def load_versions(con) -> pd.DataFrame:
-    df = pd.read_sql("SELECT * FROM document_versions", con)
-    df["word_count"] = df["text"].fillna("").str.split().str.len()
+def load_versions(con, workspace_id) -> pd.DataFrame:
+    with con.cursor() as cur:
+        cur.execute(
+            "SELECT v.* FROM document_versions v "
+            "JOIN documents d USING (document_id) WHERE d.workspace_id = %s",
+            (workspace_id,))
+        rows = cur.fetchall()
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["word_count"] = df["text"].fillna("").str.split().str.len()
     return df
 
 def find_exact_duplicates(df):
@@ -22,7 +28,7 @@ def find_near_duplicates(df, threshold=NEAR_DUP_THRESHOLD):
     try:
         sim = cosine_similarity(
             TfidfVectorizer(stop_words="english").fit_transform(ok["text"]))
-    except ValueError:              # e.g. empty vocabulary
+    except ValueError:
         return []
     pairs = []
     for i in range(len(ok)):
@@ -41,11 +47,16 @@ def add_flags(df):
     df["flag_missing_date"] = df.effective_at.isna() & (df.status == "ok")
     return df
 
-def save_flags(con, df):
-    con.execute("DELETE FROM quality_flags")
+def save_flags(con, df, workspace_id):
     cols = [c for c in df.columns if c.startswith("flag_")]
     rows = [(r.version_id, c) for r in df.itertuples() for c in cols if getattr(r, c)]
-    con.executemany("INSERT INTO quality_flags VALUES (?,?)", rows)
+    with con.cursor() as cur:
+        cur.execute(
+            "DELETE FROM quality_flags WHERE version_id IN ("
+            "SELECT v.version_id FROM document_versions v "
+            "JOIN documents d USING (document_id) WHERE d.workspace_id = %s)",
+            (workspace_id,))
+        cur.executemany("INSERT INTO quality_flags (version_id, flag_type) VALUES (%s,%s)", rows)
     con.commit()
 
 def build_report(df, unsupported) -> dict:

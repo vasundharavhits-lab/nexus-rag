@@ -1,7 +1,10 @@
 .venv/
 __pycache__/
+.pytest_cache/
 db/*.db
 data/raw/*
+data/uploads/
 reports/*
 .ipynb_checkpoints/
 .env
+.env.txt
