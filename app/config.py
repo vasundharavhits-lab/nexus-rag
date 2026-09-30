@@ -17,6 +17,10 @@ SUPPORTED = {".md", ".docx", ".pdf"}
 NEAR_DUP_THRESHOLD = 0.6
 MIN_WORDS = 30
 
+CHUNK_MAX_WORDS = 180       # words, used as a rough proxy for tokens
+CHUNK_OVERLAP_WORDS = 30    # overlap when a single paragraph must be split
+EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+
 def ensure_dirs():
     for d in (RAW_DIR, UPLOAD_DIR, REPORT_DIR):
         d.mkdir(parents=True, exist_ok=True)
