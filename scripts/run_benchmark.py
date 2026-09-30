@@ -1,6 +1,6 @@
 # scripts/run_benchmark.py
-import json, statistics
-from app import db, search, hybrid
+import json, statistics, time
+from app import db, search, hybrid, rerank
 from app.config import ROOT, REPORT_DIR, MIN_VECTOR_SCORE
 
 WS = "demo-workspace"
@@ -18,7 +18,7 @@ def first_rank(rows, rel):
 
 def evaluate(con, items, mode, strategy):
     fn = {"keyword": search.keyword_search, "vector": search.vector_search,
-          "hybrid": hybrid.hybrid_search}[mode]
+          "hybrid": hybrid.hybrid_search, "rerank": rerank.rerank_search}[mode]
     ranks = [first_rank(fn(con, WS, it["q"], max(KS), strategy), it["relevant"]) for it in items]
     out = {f"recall@{k}": round(sum(1 for r in ranks if r and r <= k) / len(ranks), 3) for k in KS}
     out["mrr"] = round(sum(1 / r for r in ranks if r) / len(ranks), 3)
@@ -36,15 +36,19 @@ def main():
     data = json.loads((ROOT / "eval" / "questions.json").read_text(encoding="utf-8"))
     ans, unans = data["answerable"], data["unanswerable"]
     con = db.connect()
+    rerank.get_model()   # load once so timing excludes model loading
 
     results = {}
-    print(f"{'config':<20}{'R@1':>7}{'R@3':>7}{'R@5':>7}{'MRR':>7}")
-    for mode in ("keyword", "vector", "hybrid"):
+    print(f"{'config':<20}{'R@1':>7}{'R@3':>7}{'R@5':>7}{'MRR':>7}{'ms/q':>8}")
+    for mode in ("keyword", "vector", "hybrid", "rerank"):
         for strat in ("structure", "fixed"):
+            t0 = time.perf_counter()
             r = evaluate(con, ans, mode, strat)
+            ms = (time.perf_counter() - t0) * 1000 / len(ans)
+            r["ms_per_query"] = round(ms, 1)
             results[f"{mode}/{strat}"] = r
             print(f"{mode + '/' + strat:<20}{r['recall@1']:>7}{r['recall@3']:>7}"
-                  f"{r['recall@5']:>7}{r['mrr']:>7}")
+                  f"{r['recall@5']:>7}{r['mrr']:>7}{ms:>8.0f}")
     for name, r in results.items():
         if r["missed"]:
             print(f"\nMissed by {name} (top 5):")
