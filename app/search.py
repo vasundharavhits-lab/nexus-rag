@@ -6,7 +6,7 @@ BASE = ("FROM chunks c "
         "JOIN document_versions v ON v.version_id = c.version_id "
         "JOIN documents d ON d.document_id = v.document_id ")
 COLS = ("c.chunk_id, c.version_id, d.logical_name, v.label, v.filename, "
-        "c.heading_path, c.page, c.text")
+        "c.heading_path, c.page, c.text, v.doc_status, v.effective_at")
 
 def keyword_search(con, workspace_id, query, k=5, strategy="structure"):
     return con.execute(

@@ -1,6 +1,7 @@
 import psycopg
 from psycopg.rows import dict_row
 from app.config import DATABASE_URL
+from psycopg.types.json import Jsonb
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -43,6 +44,19 @@ CREATE TABLE IF NOT EXISTS chunks (
         (to_tsvector('english', coalesce(heading_path, '') || ' ' || text)) STORED);
 CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING GIN (tsv);
 CREATE INDEX IF NOT EXISTS idx_chunks_version ON chunks(version_id);
+CREATE TABLE IF NOT EXISTS query_runs (
+    run_id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+    user_id TEXT NOT NULL,
+    query TEXT NOT NULL,
+    mode TEXT, k INTEGER,
+    status TEXT NOT NULL,
+    answer TEXT,
+    model TEXT,
+    evidence JSONB,
+    timings JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS idx_runs_ws ON query_runs(workspace_id);
 """
 
 VERSION_COLS = ["version_id", "document_id", "label", "filename", "source_uri",
@@ -93,4 +107,13 @@ def replace_chunks(con, version_id, strategy, chunks, vectors=None):
                 (c["chunk_id"], version_id, strategy, c["idx"], _clean(c["heading_path"]),
                  c["page"], _clean(c["text"]), c["word_count"],
                  vectors[i] if vectors else None))
+    con.commit()
+
+def save_run(con, run):
+    con.execute(
+        "INSERT INTO query_runs (run_id, workspace_id, user_id, query, mode, k, status, "
+        "answer, model, evidence, timings) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (run["run_id"], run["workspace_id"], run["user_id"], run["query"], run["mode"],
+         run["k"], run["status"], _clean(run["answer"]), run["model"],
+         Jsonb(run["evidence"]), Jsonb(run["timings"])))
     con.commit()

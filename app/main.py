@@ -9,9 +9,9 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app import db, profiling
+from app import answering, llm
 from app.config import MAX_UPLOAD_MB, SUPPORTED, UPLOAD_DIR
 from app.ingest import ingest_file
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -160,7 +160,6 @@ class SearchIn(BaseModel):
     strategy: Literal["structure", "fixed"] = "structure"
     k: int = Field(default=5, ge=1, le=20)
 
-
 @app.post("/api/v1/search")
 def search(body: SearchIn, user: str = Depends(current_user), con=Depends(get_con)):
     require_workspace(con, body.workspace_id, user)
@@ -177,6 +176,46 @@ class SearchIn(BaseModel):
     mode: Literal["keyword", "vector"] = "keyword"
     strategy: Literal["structure", "fixed"] = "structure"
     k: int = Field(default=5, ge=1, le=20)
+
+class QueryIn(BaseModel):
+    workspace_id: str
+    question: str = Field(min_length=1, max_length=500)
+    mode: Literal["keyword", "vector"] = "vector"
+    k: int = Field(default=4, ge=1, le=8)
+
+
+@app.post("/api/v1/query")
+def query(body: QueryIn, user: str = Depends(current_user), con=Depends(get_con)):
+    require_workspace(con, body.workspace_id, user)
+    try:
+        return answering.answer_question(con, body.workspace_id, user,
+                                         body.question, body.mode, body.k)
+    except llm.LLMUnavailable as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/v1/runs/{run_id}")
+def get_run(run_id: str, user: str = Depends(current_user), con=Depends(get_con)):
+    row = con.execute("SELECT * FROM query_runs WHERE run_id=%s AND user_id=%s",
+                      (run_id, user)).fetchone()
+    if not row:
+        raise HTTPException(404, "Run not found")
+    return row
+
+
+@app.get("/api/v1/chunks/{chunk_id}")
+def get_chunk(chunk_id: str, user: str = Depends(current_user), con=Depends(get_con)):
+    row = con.execute(
+        "SELECT c.chunk_id, c.strategy, c.idx, c.heading_path, c.page, c.text, "
+        "v.version_id, v.label, v.filename, v.doc_status, v.effective_at, "
+        "d.logical_name, d.workspace_id "
+        "FROM chunks c JOIN document_versions v ON v.version_id = c.version_id "
+        "JOIN documents d ON d.document_id = v.document_id "
+        "JOIN workspaces w ON w.workspace_id = d.workspace_id "
+        "WHERE c.chunk_id=%s AND w.owner=%s", (chunk_id, user)).fetchone()
+    if not row:
+        raise HTTPException(404, "Chunk not found")
+    return row
 
 @app.post("/api/v1/search")
 def search(body: SearchIn, user: str = Depends(current_user), con=Depends(get_con)):
