@@ -1,0 +1,25 @@
+{
+  "answerable": [
+    {"q": "DR-001",
+     "relevant": [{"files": ["decisions.md", "decisions_copy.md"], "contains": "decided to introduce vector search"}]},
+    {"q": "DR-002",
+     "relevant": [{"files": ["decisions.md", "decisions_copy.md"], "contains": "chose pgvector"}]},
+    {"q": "Celery",
+     "relevant": [{"files": ["architecture_v3.md"], "contains": "celery"}]},
+    {"q": "Redis",
+     "relevant": [{"files": ["architecture_v3.md"], "contains": "redis"}]},
+    {"q": "p95",
+     "relevant": [{"files": ["test_report_v1.pdf"], "contains": "p95"}]},
+    {"q": "cross-encoder",
+     "relevant": [{"files": ["meeting_2026_03.md", "meeting_2026_03_final.md"], "contains": "cross-encoder"}]},
+    {"q": "pgvector extension",
+     "relevant": [{"files": ["architecture_v2.md"], "contains": "pgvector extension stores embeddings"}]},
+    {"q": "full-text indexes",
+     "relevant": [{"files": ["architecture_v2.md"], "contains": "full-text indexes"}]},
+    {"q": "monolithic FastAPI service",
+     "relevant": [{"files": ["architecture_v1.md"], "contains": "monolithic"}]},
+    {"q": "40 questions",
+     "relevant": [{"files": ["test_report_v1.pdf"], "contains": "40 questions"}]}
+  ],
+  "unanswerable": []
+}
