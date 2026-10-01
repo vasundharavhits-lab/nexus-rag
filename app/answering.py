@@ -86,7 +86,9 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
         if "INSUFFICIENT_EVIDENCE" not in raw:
             answer = raw
             valid, invalid = parse_citations(raw, len(evidence))
-            status = "answered" if valid else "uncited"
+            body = re.sub(r"\[\d+(?:\s*,\s*\d+)*\]", "", raw).strip()
+            status = "answered" if (valid and len(body.split()) >= 3) else "uncited"
+
     t2 = time.perf_counter()
 
     trace = {"mode": mode, "route": route, "reason": reason,
