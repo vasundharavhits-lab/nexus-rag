@@ -77,7 +77,6 @@ def test_run_is_stored_and_private(client, monkeypatch):
     assert got.status_code == 200 and got.json()["status"] == "answered"
     assert client.get(f"/api/v1/runs/{rid}", headers=hdr()).status_code == 404
 
-
 def test_auto_mode_records_route_and_abstains_without_evidence(client, monkeypatch):
     def boom(*a, **k):
         raise AssertionError("LLM must not be called without evidence")
@@ -95,3 +94,15 @@ def test_run_stores_trace(client, monkeypatch):
     rid = ask(client, ws, h, "pgvector").json()["run_id"]
     got = client.get(f"/api/v1/runs/{rid}", headers=h).json()
     assert "retrieve_ms" in got["timings"]
+
+def test_bare_citation_is_not_an_answer(client, monkeypatch):
+    monkeypatch.setattr("app.llm.generate", lambda s, u: "[1]")
+    h = hdr(); ws = setup_ws(client, h)
+    assert ask(client, ws, h, "pgvector").json()["status"] == "uncited"
+
+def test_refusal_message_mentions_the_question(client, monkeypatch):
+    monkeypatch.setattr("app.llm.generate", lambda s, u: "INSUFFICIENT_EVIDENCE")
+    h = hdr(); ws = setup_ws(client, h)
+    r = ask(client, ws, h, "pgvector").json()
+    assert r["status"] == "insufficient_evidence"
+    assert "pgvector" in r["answer"] and "storage.md" in r["answer"]

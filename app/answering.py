@@ -12,7 +12,6 @@ SYSTEM = (
     "5) If sources conflict or come from different versions, say so and give the versions or dates. "
     "Be brief: at most 4 sentences."
 )
-ABSTAIN = "I don't have enough evidence in this workspace to answer that question."
 
 def dedupe(rows):
     seen, out = set(), []
@@ -41,6 +40,19 @@ def build_prompt(question, evidence):
                 f'section="{e["heading_path"]}"')
         blocks.append(f'<source id="{e["n"]}" {meta}>\n{e["text"]}\n</source>')
     return "\n\n".join(blocks) + f"\n\nQuestion: {question}"
+
+def abstain_message(question, evidence):
+    msg = f'I couldn\'t find an answer to "{question}" in this workspace.'
+    seen, near = set(), []
+    for e in evidence:
+        key = (e["filename"], e["heading_path"])
+        if key not in seen:
+            seen.add(key)
+            near.append(f'{e["filename"]} ({e["label"]}), {e["heading_path"]}')
+    if near:
+        msg += (" The nearest passages by similarity, which may not be relevant, are: "
+                + "; ".join(near[:3]) + ".")
+    return msg + " You could rephrase the question or upload a document that covers it."
 
 def _public(e):
     return {k: v for k, v in e.items() if k != "text"}
@@ -79,7 +91,7 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
                  "doc_status": r.get("doc_status"), "effective_at": r.get("effective_at"),
                  "text": r["text"]} for i, r in enumerate(rows, 1)]
 
-    status, answer, model, valid, invalid = "insufficient_evidence", ABSTAIN, None, [], []
+    status, answer, model, valid, invalid = "insufficient_evidence", "", None, [], []
     if enough_evidence(mode, rows, gate):
         model = LLM_MODEL
         raw = llm.generate(SYSTEM, build_prompt(question, evidence))
@@ -88,8 +100,10 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
             valid, invalid = parse_citations(raw, len(evidence))
             body = re.sub(r"\[\d+(?:\s*,\s*\d+)*\]", "", raw).strip()
             status = "answered" if (valid and len(body.split()) >= 3) else "uncited"
-
     t2 = time.perf_counter()
+
+    if status == "insufficient_evidence":
+        answer = abstain_message(question, evidence)
 
     trace = {"mode": mode, "route": route, "reason": reason,
              "gate_vector_score": round(float(gate), 4) if gate is not None else None,
