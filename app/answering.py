@@ -96,12 +96,12 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
     pool = k * 2 if versions.intent(question)[0] == "none" else 30
     raw_rows, gate, route, reason = retrieve(con, workspace_id, question, mode, pool)
     raw_rows = [r for r in raw_rows if not is_metadata_only(r["text"])]
-    if route == "vector":
-        gate = raw_rows[0]["score"] if raw_rows else None
     rows, vinfo = versions.apply(con, workspace_id, question, dedupe(raw_rows))
     rows = rows[:k]
+    if route == "vector":
+        gate = rows[0]["score"] if rows else None
     t1 = time.perf_counter()
-
+    
     evidence = [{"n": i, "chunk_id": r["chunk_id"], "filename": r["filename"],
                  "label": r["label"], "heading_path": r["heading_path"],
                  "page": r["page"], "score": round(float(r["score"]), 4),
@@ -126,9 +126,9 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
             
             "gate_threshold": MIN_VECTOR_SCORE,
             "gate_vector_score": round(float(gate), 4) if gate is not None else None,
-             "retrieve_ms": round((t1 - t0) * 1000, 1),
-             "generate_ms": round((t2 - t1) * 1000, 1),
-             "total_ms": round((t2 - t0) * 1000, 1)}
+            "retrieve_ms": round((t1 - t0) * 1000, 1),
+            "generate_ms": round((t2 - t1) * 1000, 1),
+            "total_ms": round((t2 - t0) * 1000, 1)}
     result = {
         "run_id": str(uuid.uuid4()), "status": status, "answer": answer,
         "citations": [_public(evidence[i - 1]) for i in valid],
