@@ -12,4 +12,7 @@ uvicorn[standard]
 psycopg[binary]
 python-dotenv
 python-multipart
-httpx
+httpxdeactivate
+Remove-Item -Recurse -Force .venv
+sentence-transformers
+numpy

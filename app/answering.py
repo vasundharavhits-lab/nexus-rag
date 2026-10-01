@@ -67,9 +67,9 @@ def retrieve(con, workspace_id, question, mode, n):
     if route == "vector":
         rows = search.vector_search(con, workspace_id, question, n)
         return rows, (rows[0]["score"] if rows else None), route, reason
-        rows = hybrid.hybrid_search(con, workspace_id, question, n)
+    rows = hybrid.hybrid_search(con, workspace_id, question, n)
     top = [r for r in search.vector_search(con, workspace_id, question, 10)
-           if not is_metadata_only(r["text"])]                   # same gate as vector
+           if not is_metadata_only(r["text"])]            # same gate as vector
     return rows, (top[0]["score"] if top else None), route, reason
 def enough_evidence(mode, rows, gate_score):
     if not rows:

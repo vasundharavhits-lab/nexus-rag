@@ -21,5 +21,11 @@
     {"q": "lock_timeout_ms",
      "relevant": [{"files": ["incident_log.md"], "contains": "lock_timeout_ms"}]}
   ],
-  "unanswerable": []
+  "unanswerable": [
+    {"q": "What is the monthly cloud hosting bill?"},
+    {"q": "Who is the CEO of the company?"},
+    {"q": "Which programming language is the mobile app written in?"},
+    {"q": "What is the weather in Paris today?"},
+    {"q": "What was the customer satisfaction score last quarter?"}
+  ]
 }
