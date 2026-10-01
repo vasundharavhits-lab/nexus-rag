@@ -1,4 +1,5 @@
 # scripts/run_benchmark.py
+from app.answering import is_metadata_only
 import json, statistics, time
 from app import db, search, hybrid, rerank
 from app.config import ROOT, REPORT_DIR, MIN_VECTOR_SCORE
@@ -28,7 +29,8 @@ def evaluate(con, items, mode, strategy):
 def top_scores(con, questions):
     scores = []
     for q in questions:
-        rows = search.vector_search(con, WS, q, 1, "structure")
+        rows = [r for r in search.vector_search(con, WS, q, 10, "structure")
+                if not is_metadata_only(r["text"])]
         scores.append(rows[0]["score"] if rows else 0.0)
     return scores
 
