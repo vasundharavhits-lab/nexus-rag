@@ -4,7 +4,7 @@ import re, time, uuid
 from numpy import finfo
 from app import db, llm, search, hybrid, router, versions
 from app.config import LLM_MODEL, MIN_VECTOR_SCORE
-
+from app import verify
 SYSTEM = (
     "You answer questions using ONLY the numbered sources provided. Rules: "
     "1) After each claim, cite the supporting source like [1] or [2]. "
@@ -101,7 +101,7 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
     if route == "vector":
         gate = rows[0]["score"] if rows else None
     t1 = time.perf_counter()
-    
+        
     evidence = [{"n": i, "chunk_id": r["chunk_id"], "filename": r["filename"],
                  "label": r["label"], "heading_path": r["heading_path"],
                  "page": r["page"], "score": round(float(r["score"]), 4),
@@ -118,10 +118,17 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
             body = re.sub(r"\[\d+(?:\s*,\s*\d+)*\]", "", raw).strip()
             status = "answered" if (valid and len(body.split()) >= 3) else "uncited"
 
+    verification = None
+    if status == "answered":
+        try:
+            verification = verify.verify_answer(
+                answer, {e["n"]: e["text"] for e in evidence})
+        except Exception as exc:          # never block an answer because the checker failed
+            verification = {"error": str(exc)}
+
     t2 = time.perf_counter()
     if status == "insufficient_evidence":
         answer = abstain_message(question, evidence)
-
     trace = {"mode": mode, "route": route, "reason": reason, "version": vinfo,
             
             "gate_threshold": MIN_VECTOR_SCORE,
@@ -134,6 +141,7 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
         "citations": [_public(evidence[i - 1]) for i in valid],
         "evidence": [_public(e) for e in evidence],
         "invalid_citations": invalid, "model": model, "trace": trace,
+        "verification": verification,
         "timings_ms": {"retrieve": trace["retrieve_ms"], "generate": trace["generate_ms"],
                        "total": trace["total_ms"]},
     }
