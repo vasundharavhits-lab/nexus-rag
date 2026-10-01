@@ -31,14 +31,16 @@ def run(con, items, label):
 def main():
     con = db.connect()
     for fname, label in (("questions.json", "Paraphrased questions"),
-                         ("exact_questions.json", "Exact-term questions")):
+                         ("exact_questions.json", "Exact-term questions"),
+                         ("stress_questions.json", "Stress questions")):
         data = json.loads((ROOT / "eval" / fname).read_text(encoding="utf-8"))
         run(con, data["answerable"], label)
-    print("\nRoutes chosen for the exact-term set:")
-    data = json.loads((ROOT / "eval" / "exact_questions.json").read_text(encoding="utf-8"))
-    for it in data["answerable"]:
-        route, why = router.classify(it["q"])
-        print(f"  {it['q']:<28} -> {route:<7} ({why})")
+    for fname in ("exact_questions.json", "stress_questions.json"):
+        print(f"\nRoutes chosen for {fname}:")
+        data = json.loads((ROOT / "eval" / fname).read_text(encoding="utf-8"))
+        for it in data["answerable"]:
+            route, why = router.classify(it["q"])
+            print(f"  {it['q']:<52} -> {route:<7} ({why})")
 
 if __name__ == "__main__":
     main()

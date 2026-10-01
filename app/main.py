@@ -180,7 +180,7 @@ class SearchIn(BaseModel):
 class QueryIn(BaseModel):
     workspace_id: str
     question: str = Field(min_length=1, max_length=500)
-    mode: Literal["keyword", "vector"] = "vector"
+    mode: Literal["keyword", "vector", "auto"] = "vector"
     k: int = Field(default=4, ge=1, le=8)
 
 

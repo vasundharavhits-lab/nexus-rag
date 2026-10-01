@@ -76,3 +76,22 @@ def test_run_is_stored_and_private(client, monkeypatch):
     got = client.get(f"/api/v1/runs/{rid}", headers=alice)
     assert got.status_code == 200 and got.json()["status"] == "answered"
     assert client.get(f"/api/v1/runs/{rid}", headers=hdr()).status_code == 404
+
+
+def test_auto_mode_records_route_and_abstains_without_evidence(client, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("LLM must not be called without evidence")
+    monkeypatch.setattr("app.llm.generate", boom)
+    h = hdr(); ws = setup_ws(client, h)
+    r = client.post("/api/v1/query", headers=h, json={
+        "workspace_id": ws, "mode": "auto",
+        "question": "Why did the team adopt this approach for storing data?"}).json()
+    assert r["status"] == "insufficient_evidence"
+    assert r["trace"]["route"] == "vector" and r["trace"]["mode"] == "auto"
+
+def test_run_stores_trace(client, monkeypatch):
+    monkeypatch.setattr("app.llm.generate", lambda s, u: "It stores embeddings [1].")
+    h = hdr(); ws = setup_ws(client, h)
+    rid = ask(client, ws, h, "pgvector").json()["run_id"]
+    got = client.get(f"/api/v1/runs/{rid}", headers=h).json()
+    assert "retrieve_ms" in got["timings"]

@@ -14,3 +14,5 @@ def test_conceptual_question_routes_to_vector():
 
 def test_every_route_has_a_reason():
     assert classify("How slow were the slowest requests?")[1]
+def test_version_question_stays_on_vector():
+    assert classify("What changed in v3?")[0] == "vector"

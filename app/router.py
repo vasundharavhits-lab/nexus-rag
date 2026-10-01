@@ -3,10 +3,9 @@ import re, time
 from app import search, hybrid
 
 ID_PATTERNS = [
-    (r"\b[A-Za-z]{1,6}-\d+\b", "identifier like DR-002"),
+    (r"\b[A-Za-z]{1,6}-\d+\b", "identifier (e.g. DR-002)"),
     (r"\b[a-z0-9]+_[a-z0-9_]+\b", "snake_case term"),
     (r"\b\w+\.(?:md|pdf|docx|py|json)\b", "file name"),
-    (r"\bv\d+\b", "version label"),
     (r"\"[^\"]+\"", "quoted phrase"),
 ]
 
