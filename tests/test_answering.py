@@ -106,3 +106,20 @@ def test_refusal_message_mentions_the_question(client, monkeypatch):
     r = ask(client, ws, h, "pgvector").json()
     assert r["status"] == "insufficient_evidence"
     assert "pgvector" in r["answer"] and "storage.md" in r["answer"]
+
+
+
+def test_verification_flags_claim_the_source_does_not_support(client, monkeypatch):
+    # First sentence is in the source. Second one is invented but still cites [1].
+    monkeypatch.setattr(
+        "app.llm.generate",
+        lambda s, u: ("The pgvector extension stores embeddings for semantic retrieval [1]. "
+                      "MongoDB is the primary database [1]."))
+    h = hdr(); ws = setup_ws(client, h)
+    r = ask(client, ws, h, "pgvector").json()
+    # the old check still accepts it, because a valid [1] is present
+    assert r["status"] == "answered"
+    v = r["verification"]
+    assert len(v) == 2
+    assert v[0]["verdict"] == "supported"
+    assert v[1]["verdict"] != "supported"
