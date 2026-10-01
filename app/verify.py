@@ -17,7 +17,7 @@ def get_model():
 
 def split_claims(answer):
     """Split an answer into sentences, with citation markers removed, plus the cited numbers."""
-    parts = re.split(r"(?<=[.!?])\s+", answer.strip())
+    parts = re.split(r"(?<=[.!?])\s+(?!\[)", answer.strip())
     out = []
     for p in parts:
         cited = sorted({int(x) for g in re.findall(r"\[(\d+(?:\s*,\s*\d+)*)\]", p)
