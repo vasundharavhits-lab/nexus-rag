@@ -130,7 +130,7 @@ Questions are in `eval/`, and saved results (ablation, benchmark, ingestion qual
 1. Create a workspace and upload everything in `data/raw`. Index it. The broken PDF is rejected and recorded, and the duplicate files are flagged.
 2. Ask `What causes ERR-5023?` (auto mode). The router picks hybrid search and the answer cites `incident_log.md`.
 3. Ask `Why was DR-002 decided?`. The answer cites the decision record.
-4. Ask `What is the currently approved architecture?`. Open the `trace`: the `version` field lists the older files that were dropped.
+4. Ask `How does the current architecture handle ingestion?`. Open the `trace`: the `version` field lists the older files that were dropped.
 5. Ask `Who is the CEO of the company?`. The system answers `insufficient_evidence` and names the nearest passages instead of inventing an answer.
 6. Open the `verification` field of an answered query to see each sentence marked supported or not.
 
