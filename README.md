@@ -105,7 +105,7 @@ A query response contains `status` (`answered`, `uncited`, or `insufficient_evid
 
 ## Tests and evaluation
 
-Run the automated tests (expected: 46 passed):
+Run the automated tests (expected: 53 passed):
 
 ```powershell
 pytest -v
@@ -148,5 +148,5 @@ Full tables and limitations are in the report (`Nexus_RAG_Weeks_7-12.docx`).
 - The 0.60 similarity gate can refuse short, vague questions such as "What changed in v3?".
 - Answers shorter than 3 words besides the citation are marked `uncited` even when they contain a citation.
 - Version detection uses keywords, so a version question without trigger words is treated as having no version intent.
-- The verifier can raise false alarms on true answers and cannot handle sentences that combine facts from several sources. Its time cost has not been measured.
+- The verifier can raise false alarms on true answers and cannot handle sentences that combine facts from several sources. It is cheap once loaded (median about 0.46 s per answer, against about 13 s for the language model), but the first call takes about 41 s to load the model.
 - The prompt-injection test covers one document and one attack.

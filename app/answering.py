@@ -1,7 +1,5 @@
 # app/answering.py
 import re, time, uuid
-
-from numpy import finfo
 from app import db, llm, search, hybrid, router, versions
 from app.config import LLM_MODEL, MIN_VECTOR_SCORE
 from app import verify
@@ -117,7 +115,7 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
             valid, invalid = parse_citations(raw, len(evidence))
             body = re.sub(r"\[\d+(?:\s*,\s*\d+)*\]", "", raw).strip()
             status = "answered" if (valid and len(body.split()) >= 3) else "uncited"
-
+    tv0 = time.perf_counter()
     verification = None
     if status == "answered":
         try:
@@ -126,15 +124,20 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
         except Exception as exc:          # never block an answer because the checker failed
             verification = {"error": str(exc)}
 
+    
+    verify_ms = round((time.perf_counter() - tv0) * 1000, 1)
     t2 = time.perf_counter()
     if status == "insufficient_evidence":
         answer = abstain_message(question, evidence)
     trace = {"mode": mode, "route": route, "reason": reason, "version": vinfo,
+             "verify_ms": verify_ms,
             
             "gate_threshold": MIN_VECTOR_SCORE,
             "gate_vector_score": round(float(gate), 4) if gate is not None else None,
             "retrieve_ms": round((t1 - t0) * 1000, 1),
             "generate_ms": round((t2 - t1) * 1000, 1),
+            "gate_threshold": MIN_VECTOR_SCORE,
+             "verify_ms": verify_ms,
             "total_ms": round((t2 - t0) * 1000, 1)}
     result = {
         "run_id": str(uuid.uuid4()), "status": status, "answer": answer,
