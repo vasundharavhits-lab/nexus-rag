@@ -226,3 +226,5 @@ def search(body: SearchIn, user: str = Depends(current_user), con=Depends(get_co
     return {"query": body.query, "mode": body.mode, "strategy": body.strategy,
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
             "results": results}
+from app import feedback
+feedback.register(app, get_con, current_user)
