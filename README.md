@@ -63,7 +63,30 @@ uvicorn app.main:app --reload
 
 Open http://127.0.0.1:8000/docs for the interactive API page.
 
-A simple evidence explorer is at http://127.0.0.1:8000/explorer. Type a question to see the answer, clickable citations, the per-sentence claim check, the route and gate score, and send thumbs-up or thumbs-down feedback. The user and workspace fields default to the demo values (`demo-user`, `demo-workspace`), which exist after `python -m scripts.run_ingestion` and `python -m scripts.build_index`; enter your own ids to use another workspace.
+## Run with Docker
+
+Docker starts the API and a PostgreSQL database together, so you do not need to install PostgreSQL or the Python packages. Ollama still runs on your own computer, because the model is large.
+
+1. Install and start Docker Desktop, and wait until it shows "Engine running".
+2. Start Ollama on your computer and pull the model once: `ollama pull qwen2.5:3b`.
+3. In the project folder, run:
+
+```powershell
+docker compose up --build
+```
+
+The first build downloads PyTorch and the Python packages and can take 10 to 20 minutes. The embedding and verification models are downloaded on the first query and kept in a Docker volume, so they are not downloaded again.
+
+4. When the log shows `Uvicorn running on http://0.0.0.0:8000`, open http://127.0.0.1:8000/docs.
+5. To run the abstention test inside the container (expected: 5/5 correct abstentions, 1/10 wrong abstentions), open a second terminal and run:
+
+```powershell
+docker compose exec api python -m scripts.eval_abstain data/raw
+```
+
+6. Stop with Ctrl+C, or `docker compose down` (add `-v` to also delete the stored database and models).
+
+Settings can be changed with environment variables: `POSTGRES_PASSWORD` (the default `nexus_dev` is for local development only), `OLLAMA_URL` and `LLM_MODEL`. The `.env` file is not copied into the image.
 
 ## Using the API
 
@@ -77,14 +100,12 @@ All requests need the header `X-User-Id` (any string; each user only sees their 
 | POST | `/api/v1/query` | Ask a question (`mode`: `auto`, `vector`, `keyword`) |
 | GET | `/api/v1/runs/{id}` | Inspect a past run: evidence, trace, timings |
 | GET | `/api/v1/chunks/{id}` | Read the exact cited passage |
-| POST | `/api/v1/feedback` | Rate a past run (thumbs up or down, issue type, comment) |
-| GET | `/api/v1/analytics/retrieval?workspace_id=...` | Run statistics: status rates, routes, median timings, feedback counts |
 
 A query response contains `status` (`answered`, `uncited`, or `insufficient_evidence`), the `answer`, `citations`, `evidence`, a `trace` (route, version decision, gate score and threshold, timings) and a `verification` field with per-sentence verdicts.
 
 ## Tests and evaluation
 
-Run the automated tests (expected: 53 passed):
+Run the automated tests (expected: 46 passed):
 
 ```powershell
 pytest -v

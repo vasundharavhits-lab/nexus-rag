@@ -21,7 +21,7 @@ CHUNK_MAX_WORDS = 180       # words, used as a rough proxy for tokens
 CHUNK_OVERLAP_WORDS = 30    # overlap when a single paragraph must be split
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 
-OLLAMA_URL = "http://localhost:11434"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:3b")
 LLM_TIMEOUT_S = 300
 LLM_MAX_TOKENS = 250
