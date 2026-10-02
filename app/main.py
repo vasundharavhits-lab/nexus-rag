@@ -228,3 +228,6 @@ def search(body: SearchIn, user: str = Depends(current_user), con=Depends(get_co
             "results": results}
 from app import feedback
 feedback.register(app, get_con, current_user)
+
+from app import analytics
+analytics.register(app, get_con, current_user, require_workspace)

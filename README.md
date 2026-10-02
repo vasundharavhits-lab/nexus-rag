@@ -75,12 +75,14 @@ All requests need the header `X-User-Id` (any string; each user only sees their 
 | POST | `/api/v1/query` | Ask a question (`mode`: `auto`, `vector`, `keyword`) |
 | GET | `/api/v1/runs/{id}` | Inspect a past run: evidence, trace, timings |
 | GET | `/api/v1/chunks/{id}` | Read the exact cited passage |
+| POST | `/api/v1/feedback` | Rate a past run (thumbs up or down, issue type, comment) |
+| GET | `/api/v1/analytics/retrieval?workspace_id=...` | Run statistics: status rates, routes, median timings, feedback counts |
 
 A query response contains `status` (`answered`, `uncited`, or `insufficient_evidence`), the `answer`, `citations`, `evidence`, a `trace` (route, version decision, gate score and threshold, timings) and a `verification` field with per-sentence verdicts.
 
 ## Tests and evaluation
 
-Run the automated tests (expected: 46 passed):
+Run the automated tests (expected: 52 passed):
 
 ```powershell
 pytest -v
