@@ -170,13 +170,6 @@ def search(body: SearchIn, user: str = Depends(current_user), con=Depends(get_co
             "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
             "results": results}
 
-class SearchIn(BaseModel):
-    workspace_id: str
-    query: str = Field(min_length=1, max_length=500)
-    mode: Literal["keyword", "vector"] = "keyword"
-    strategy: Literal["structure", "fixed"] = "structure"
-    k: int = Field(default=5, ge=1, le=20)
-
 class QueryIn(BaseModel):
     workspace_id: str
     question: str = Field(min_length=1, max_length=500)
@@ -217,15 +210,6 @@ def get_chunk(chunk_id: str, user: str = Depends(current_user), con=Depends(get_
         raise HTTPException(404, "Chunk not found")
     return row
 
-@app.post("/api/v1/search")
-def search(body: SearchIn, user: str = Depends(current_user), con=Depends(get_con)):
-    require_workspace(con, body.workspace_id, user)
-    fn = search_mod.keyword_search if body.mode == "keyword" else search_mod.vector_search
-    t0 = time.perf_counter()
-    results = fn(con, body.workspace_id, body.query, body.k, body.strategy)
-    return {"query": body.query, "mode": body.mode, "strategy": body.strategy,
-            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
-            "results": results}
 from app import feedback
 feedback.register(app, get_con, current_user)
 
