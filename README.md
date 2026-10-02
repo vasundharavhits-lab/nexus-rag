@@ -63,6 +63,8 @@ uvicorn app.main:app --reload
 
 Open http://127.0.0.1:8000/docs for the interactive API page.
 
+A simple evidence explorer is at http://127.0.0.1:8000/explorer. Type a question to see the answer, clickable citations, the per-sentence claim check, the route and gate score, and send thumbs-up or thumbs-down feedback. The user and workspace fields default to the demo values (`demo-user`, `demo-workspace`), which exist after `python -m scripts.run_ingestion` and `python -m scripts.build_index`; enter your own ids to use another workspace.
+
 ## Using the API
 
 All requests need the header `X-User-Id` (any string; each user only sees their own workspaces).
@@ -82,7 +84,7 @@ A query response contains `status` (`answered`, `uncited`, or `insufficient_evid
 
 ## Tests and evaluation
 
-Run the automated tests (expected: 52 passed):
+Run the automated tests (expected: 53 passed):
 
 ```powershell
 pytest -v

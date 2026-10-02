@@ -231,3 +231,6 @@ feedback.register(app, get_con, current_user)
 
 from app import analytics
 analytics.register(app, get_con, current_user, require_workspace)
+
+from app import explorer
+explorer.register(app)

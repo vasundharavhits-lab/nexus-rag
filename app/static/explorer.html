@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXUS RAG Explorer</title>
+<style>
+body{font-family:Segoe UI,Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#1b1f24}
+h1{font-size:22px}
+.row{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap;align-items:center}
+input,select,button{font:inherit;padding:6px 8px}
+input.q{flex:1;min-width:260px}
+button{cursor:pointer}
+.card{border:1px solid #d0d7de;border-radius:6px;padding:12px;margin:12px 0}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;color:#fff}
+.answered{background:#2da44e}.insufficient_evidence{background:#bf8700}.uncited{background:#cf222e}
+.supported{color:#1a7f37}.wrong_source{color:#9a6700}.unsupported{color:#cf222e}
+.muted{color:#656d76;font-size:13px}
+pre{white-space:pre-wrap;background:#f6f8fa;padding:8px;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>NEXUS RAG Explorer</h1>
+<div class="row">
+  <label>User <input id="user" value="demo-user"></label>
+  <label>Workspace <input id="ws" value="demo-workspace" size="28"></label>
+  <label>Mode <select id="mode"><option>auto</option><option>vector</option><option>keyword</option></select></label>
+</div>
+<div class="row">
+  <input id="q" class="q" placeholder="Ask a question about your documents">
+  <button id="ask">Ask</button>
+</div>
+<div id="out"></div>
+<script>
+const $ = id => document.getElementById(id);
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text !== undefined && text !== null) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+
+function headers() {
+  return {"X-User-Id": $("user").value.trim(), "Content-Type": "application/json"};
+}
+
+async function api(path, options) {
+  const r = await fetch(path, options);
+  let body = null;
+  try { body = await r.json(); } catch (e) {}
+  if (!r.ok) {
+    const d = body && body.detail;
+    throw new Error(d ? (typeof d === "string" ? d : JSON.stringify(d)) : "Request failed (" + r.status + ")");
+  }
+  return body;
+}
+
+async function ask() {
+  const out = $("out");
+  out.replaceChildren(el("p", "Working... the first question can be slow while the models load.", "muted"));
+  $("ask").disabled = true;
+  try {
+    const res = await api("/api/v1/query", {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({workspace_id: $("ws").value.trim(),
+                            question: $("q").value.trim(), mode: $("mode").value})
+    });
+    render(res);
+  } catch (e) {
+    out.replaceChildren(el("p", "Error: " + e.message, "unsupported"));
+  } finally {
+    $("ask").disabled = false;
+  }
+}
+
+function render(res) {
+  const out = $("out");
+  out.replaceChildren();
+
+  const a = el("div", null, "card");
+  a.appendChild(el("span", res.status, "badge " + res.status));
+  a.appendChild(el("pre", res.answer));
+  out.appendChild(a);
+
+  if (res.citations && res.citations.length) {
+    const c = el("div", null, "card");
+    c.appendChild(el("strong", "Citations"));
+    for (const x of res.citations) {
+      const line = el("div", null, "row");
+      line.appendChild(el("span", "[" + x.n + "] " + x.filename + " (" + x.label + "), " +
+                                  x.heading_path + "  score " + x.score));
+      const b = el("button", "View passage");
+      const box = el("pre");
+      box.style.display = "none";
+      b.onclick = async () => {
+        if (box.style.display === "block") { box.style.display = "none"; return; }
+        try {
+          const ch = await api("/api/v1/chunks/" + x.chunk_id, {headers: headers()});
+          box.textContent = ch.text;
+        } catch (e) {
+          box.textContent = "Error: " + e.message;
+        }
+        box.style.display = "block";
+      };
+      line.appendChild(b);
+      c.appendChild(line);
+      c.appendChild(box);
+    }
+    out.appendChild(c);
+  }
+
+  const v = res.verification;
+  if (Array.isArray(v) && v.length) {
+    const c = el("div", null, "card");
+    c.appendChild(el("strong", "Claim check"));
+    for (const item of v) {
+      const line = el("div", null, "row");
+      line.appendChild(el("span", item.verdict, item.verdict));
+      let text = item.claim;
+      if (item.better_sources && item.better_sources.length) {
+        text += "  (better source: " + item.better_sources.join(", ") + ")";
+      }
+      line.appendChild(el("span", text));
+      c.appendChild(line);
+    }
+    out.appendChild(c);
+  } else if (v && v.error) {
+    out.appendChild(el("p", "Claim check unavailable: " + v.error, "muted"));
+  }
+
+  const t = res.trace || {};
+  const info = ["route: " + t.route,
+                "gate: " + t.gate_vector_score + " (threshold " + t.gate_threshold + ")",
+                "retrieve " + t.retrieve_ms + " ms", "generate " + t.generate_ms + " ms"];
+  if (t.version && t.version.dropped && t.version.dropped.length) {
+    info.push("older versions dropped: " + t.version.dropped.join(", "));
+  }
+  out.appendChild(el("p", info.join("  |  "), "muted"));
+
+  const f = el("div", null, "card");
+  f.appendChild(el("strong", "Was this useful?"));
+  const row = el("div", null, "row");
+  const issue = el("select");
+  for (const o of ["none", "wrong_answer", "bad_citation", "missing_source", "other"]) {
+    const op = el("option", o);
+    op.value = o;
+    issue.appendChild(op);
+  }
+  const comment = el("input");
+  comment.placeholder = "Optional comment";
+  comment.size = 36;
+  const msg = el("span", "", "muted");
+  async function send(rating) {
+    try {
+      await api("/api/v1/feedback", {
+        method: "POST", headers: headers(),
+        body: JSON.stringify({run_id: res.run_id, rating: rating,
+                              issue_type: issue.value, comment: comment.value || null})
+      });
+      msg.textContent = "Thanks, feedback saved.";
+    } catch (e) {
+      msg.textContent = "Error: " + e.message;
+    }
+  }
+  const up = el("button", "Helpful");
+  up.onclick = () => send(1);
+  const down = el("button", "Not helpful");
+  down.onclick = () => send(-1);
+  for (const n of [up, down, issue, comment, msg]) row.appendChild(n);
+  f.appendChild(row);
+  out.appendChild(f);
+}
+
+$("ask").onclick = ask;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
+</script>
+</body>
+</html>
