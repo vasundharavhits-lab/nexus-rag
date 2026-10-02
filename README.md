@@ -138,6 +138,7 @@ Questions are in `eval/`, and saved results (ablation, benchmark, ingestion qual
 
 - Structure-aware chunking gave a clearly better MRR than fixed-size chunks (0.90 against 0.73). Hybrid search and reranking did not beat plain vector search on this small corpus.
 - Abstention: 5 of 5 unanswerable questions refused, 1 of 10 answerable questions wrongly refused.
+- Held-out check (15 answerable and 8 unanswerable questions not used to set the threshold): 14 of 15 answerable passed the gate and 7 of 8 unanswerable were refused. The perfect score on the tuning set was optimistic.
 - A hidden "ignore previous instructions" line in a document did not change the answer.
 
 Full tables and limitations are in the report (`Nexus_RAG_Weeks_7-12.docx`).
@@ -145,6 +146,7 @@ Full tables and limitations are in the report (`Nexus_RAG_Weeks_7-12.docx`).
 ## Known limitations
 
 - The corpus is small (13 documents), and the system was tuned on questions similar to the test questions, so the scores are probably optimistic.
+- The held-out check is small and was run once. One unanswerable question ("What is the maximum file size for uploads?", score 0.617) passed the 0.60 gate, and one answerable question (0.576) was refused, so no single threshold fixes both errors.
 - The 0.60 similarity gate can refuse short, vague questions such as "What changed in v3?".
 - Answers shorter than 3 words besides the citation are marked `uncited` even when they contain a citation.
 - Version detection uses keywords, so a version question without trigger words is treated as having no version intent.
