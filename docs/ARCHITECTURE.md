@@ -1,6 +1,6 @@
 # Nexus RAG: Architecture and API
 
-This document describes how the system is built, how a question flows through it, and what the API offers. For setup and running instructions, see `README.md`. For measured results, see the report `Nexus_RAG_Weeks_7-12.docx`.
+This document describes how the system is built, how a question flows through it, and what the API offers. For setup and running instructions, see `README.md`. For measured results, see the report `Nexus_RAG_Project_report.docx`.
 
 ## 1. Overview
 

@@ -141,7 +141,7 @@ Questions are in `eval/`, and saved results (ablation, benchmark, ingestion qual
 - Held-out check (15 answerable and 8 unanswerable questions not used to set the threshold): 14 of 15 answerable passed the gate and 7 of 8 unanswerable were refused. The perfect score on the tuning set was optimistic.
 - A hidden "ignore previous instructions" line in a document did not change the answer.
 
-Full tables and limitations are in the report (`Nexus_RAG_Weeks_7-12.docx`).
+Full tables and limitations are in the report (`Nexus_RAG_Project_report.docx`).
 
 ## Known limitations
 
