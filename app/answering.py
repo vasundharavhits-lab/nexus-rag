@@ -1,6 +1,6 @@
 # app/answering.py
 import re, time, uuid
-from app import db, llm, search, hybrid, router, versions
+from app import db, llm, search, hybrid, router, versions, changes
 from app.config import LLM_MODEL, MIN_VECTOR_SCORE
 from app import verify
 SYSTEM = (
@@ -91,6 +91,17 @@ def abstain_message(question, evidence):
 
 def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
     t0 = time.perf_counter()
+    # "What changed from v1 to v3?" is answered by diffing the stored versions, not by
+    # similarity search; falls through to normal RAG when it is not a comparison question.
+    cmp_res = changes.answer_compare(con, workspace_id, question)
+    if cmp_res is not None:
+        cmp_res["trace"]["mode"] = mode
+        db.save_run(con, {"run_id": cmp_res["run_id"], "workspace_id": workspace_id,
+                          "user_id": user_id, "query": question, "mode": mode, "k": k,
+                          "status": cmp_res["status"], "answer": cmp_res["answer"],
+                          "model": None, "evidence": cmp_res["evidence"],
+                          "timings": cmp_res["trace"]})
+        return cmp_res
     pool = k * 2 if versions.intent(question)[0] == "none" else 30
     raw_rows, gate, route, reason = retrieve(con, workspace_id, question, mode, pool)
     raw_rows = [r for r in raw_rows if not is_metadata_only(r["text"])]
@@ -120,7 +131,9 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
     if status == "answered":
         try:
             verification = verify.verify_answer(
-                answer, {e["n"]: e["text"] for e in evidence})
+                answer, {e["n"]: e["text"] for e in evidence},
+                {e["n"]: {"label": e.get("label"), "status": e.get("doc_status")}
+                 for e in evidence})
         except Exception as exc:          # never block an answer because the checker failed
             verification = {"error": str(exc)}
 
@@ -135,7 +148,7 @@ def answer_question(con, workspace_id, user_id, question, mode="vector", k=4):
             "gate_threshold": MIN_VECTOR_SCORE,
             "gate_vector_score": round(float(gate), 4) if gate is not None else None,
             "retrieve_ms": round((t1 - t0) * 1000, 1),
-            "generate_ms": round((t2 - t1) * 1000, 1),
+            "generate_ms": round((tv0 - t1) * 1000, 1),   # LLM only; verify is separate
             "gate_threshold": MIN_VECTOR_SCORE,
              "verify_ms": verify_ms,
             "total_ms": round((t2 - t0) * 1000, 1)}

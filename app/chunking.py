@@ -12,6 +12,37 @@ def _split_long(words, max_words, overlap):
             break
     return pieces
 
+_SENT_END = re.compile(r"(?<=[.!?])\s+")
+
+def _split_long_text(text, max_words, overlap):
+    """Split one long block into pieces of at most `max_words`, cutting only at sentence ends.
+    Consecutive pieces share whole trailing sentences (up to `overlap` words). A single
+    sentence longer than `max_words` is cut by words, as before."""
+    sents = [s for s in _SENT_END.split(text) if s]
+    pieces, cur, n = [], [], 0
+    for s in sents:
+        w = len(s.split())
+        if w > max_words:                              # one giant "sentence"
+            if cur:
+                pieces.append(" ".join(cur)); cur, n = [], 0
+            pieces += _split_long(s.split(), max_words, overlap)
+            continue
+        if cur and n + w > max_words:
+            pieces.append(" ".join(cur))
+            carry, m = [], 0
+            for t in reversed(cur):
+                tw = len(t.split())
+                if m + tw > overlap:
+                    break
+                carry.insert(0, t); m += tw
+            if m + w > max_words:
+                carry, m = [], 0
+            cur, n = carry, m
+        cur.append(s); n += w
+    if cur:
+        pieces.append(" ".join(cur))
+    return pieces
+
 def chunk_structure(sections, max_words=CHUNK_MAX_WORDS, overlap=CHUNK_OVERLAP_WORDS):
     out = []
     for s in sections:
@@ -28,7 +59,7 @@ def chunk_structure(sections, max_words=CHUNK_MAX_WORDS, overlap=CHUNK_OVERLAP_W
             if w > max_words:                       # one huge paragraph: split it
                 if buf:
                     emit("\n\n".join(buf)); buf, n = [], 0
-                for piece in _split_long(p.split(), max_words, overlap):
+                for piece in _split_long_text(p, max_words, overlap):
                     emit(piece)
                 continue
             if buf and n + w > max_words:           # buffer full: start a new chunk

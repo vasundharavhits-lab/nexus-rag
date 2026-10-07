@@ -8,10 +8,25 @@ from app.parsing import parse_markdown_text, docx_to_markdown, parse_pdf
 DetectorFactory.seed = 0
 NS = uuid.UUID("12345678-1234-5678-1234-567812345678")
 
+_KEYS = ("Status", "Date", "Author")
+_KEY_SPLIT = re.compile(r"\s+(?=(?:Status|Date|Author):)", re.I)
+
+def _header_lines(text: str):
+    """Yield lines with Markdown noise removed so that '- **Status:** Approved'
+    reads like 'Status: Approved', and 'Status: A Date: B' (PDF text extraction
+    often joins header lines) is split back into one key per line."""
+    for ln in text.splitlines():
+        ln = re.sub(r"^[\s>\-*+]+", "", ln.replace("*", "").replace("`", ""))
+        if re.match(r"(?:Status|Date|Author):", ln, re.I):
+            yield from _KEY_SPLIT.split(ln)
+        else:
+            yield ln
+
 def extract_metadata(text: str) -> dict:
+    scan = "\n".join(_header_lines(text))
     meta = {}
-    for key in ("Status", "Date", "Author"):
-        m = re.search(rf"^{key}:\s*(.+)$", text, re.I | re.M)
+    for key in _KEYS:
+        m = re.search(rf"^{key}:\s*(.+)$", scan, re.I | re.M)
         meta[key.lower()] = m.group(1).strip() if m else None
     return meta
 

@@ -14,6 +14,14 @@ def main():
         kept = sum(s >= t for s in a)
         rej = sum(s < t for s in u)
         print(f"{t:>9.2f} {kept:>12}/{len(a)} {rej:>18}/{len(u)}")
+        print("\nanswerable questions scoring below 0.60:")
+    for it, s in sorted(zip(data["answerable"], a), key=lambda p: p[1]):
+        if s < 0.60:
+            print(f"  {s:.3f}  {it['q']}")
+    print("\nunanswerable questions scoring at or above 0.52:")
+    for q, s in sorted(zip(data["unanswerable"], u), key=lambda p: p[1]):
+        if s >= 0.52:
+            print(f"  {s:.3f}  {q}")
     print("\nunanswerable top-1 scores:", sorted(round(s, 3) for s in u))
 
 if __name__ == "__main__":

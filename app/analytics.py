@@ -20,9 +20,14 @@ def register(app, get_con, current_user, require_workspace):
         runs = con.execute(
             "SELECT status, model, timings FROM query_runs WHERE workspace_id=%s",
             (workspace_id,)).fetchall()
-        n = len(runs)
-        if n == 0:
+        total_runs = len(runs)
+        if total_runs == 0:
             return {"total_runs": 0}
+        general = sum(1 for r in runs if r["status"] == "general_answer")
+        # General chat is not document RAG: keep it out of the rates and latency medians
+        # so they still describe the retrieval pipeline.
+        runs = [r for r in runs if r["status"] != "general_answer"]
+        n = len(runs)
         timings = [r["timings"] or {} for r in runs]
         by_status = Counter(r["status"] for r in runs)
         by_route = Counter(t["route"] for t in timings if "route" in t)
@@ -39,11 +44,12 @@ def register(app, get_con, current_user, require_workspace):
         issues = Counter(f["issue_type"] for f in fb
                          if f["rating"] == -1 and f["issue_type"] != "none")
         return {
-            "total_runs": n,
+            "total_runs": total_runs,
+            "general_answers": general,
             "by_status": dict(by_status),
-            "answered_rate": round(by_status["answered"] / n, 3),
-            "refusal_rate": round(by_status["insufficient_evidence"] / n, 3),
-            "uncited_rate": round(by_status["uncited"] / n, 3),
+            "answered_rate": round(by_status["answered"] / n, 3) if n else None,
+            "refusal_rate": round(by_status["insufficient_evidence"] / n, 3) if n else None,
+            "uncited_rate": round(by_status["uncited"] / n, 3) if n else None,
             "by_route": dict(by_route),
             "median_ms": {"retrieve": _med(retrieve), "generate": _med(generate),
                           "total": _med(total)},

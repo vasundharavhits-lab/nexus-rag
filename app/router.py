@@ -7,6 +7,8 @@ ID_PATTERNS = [
     (r"\b[a-z0-9]+_[a-z0-9_]+\b", "snake_case term"),
     (r"\b\w+\.(?:md|pdf|docx|py|json)\b", "file name"),
     (r"\"[^\"]+\"", "quoted phrase"),
+    # "set 15", "section 3", "step 7" - dense search cannot tell 15 from 30 (not "version 2" / "v3")
+    (r"\b(?!version\b|v\b)[A-Za-z]{2,}\s+\d+\b(?![.-]\d)", "numbered reference (e.g. set 15)"),
 ]
 
 def classify(query: str):

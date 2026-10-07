@@ -1,5 +1,5 @@
-import psycopg
-from psycopg.rows import dict_row
+import psycopg                              #- It allows your Python code to run SQL queries.,PostgreSQL connection.
+from psycopg.rows import dict_row           #- It makes database results come as Python dictionaries instead of tuples.
 from app.config import DATABASE_URL
 from psycopg.types.json import Jsonb
 

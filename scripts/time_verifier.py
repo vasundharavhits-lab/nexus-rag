@@ -28,11 +28,12 @@ with TestClient(app) as c:
             print("verify_ms is missing from the trace: the edit in answering.py did not land.")
             raise SystemExit
         rows.append((item["q"], g, v))
-        print(f"generate_total={g:8.1f} ms | verifier={v:8.1f} ms | {item['q']}")
+        print(f"generate={g:8.1f} ms | verifier={v:8.1f} ms | {item['q']}")
 
     warm = rows[1:]   # the first answered question loads the models, so it is skipped
     print(f"\nAnswered questions timed: {len(warm)} (first one skipped as warm-up)")
     print("First call verifier (model loading):", rows[0][2], "ms")
     print("Median verifier time:", round(statistics.median(r[2] for r in warm), 1), "ms")
-    print("Median generation time without verifier:",
-          round(statistics.median(r[1] - r[2] for r in warm), 1), "ms")
+    # generate_ms now measures the LLM only (verify is timed separately)
+    print("Median generation time (LLM only):",
+          round(statistics.median(r[1] for r in warm), 1), "ms")

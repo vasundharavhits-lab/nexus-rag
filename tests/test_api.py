@@ -58,3 +58,9 @@ def test_corpus_analytics_counts(client):
     upload(client, ws, h, "empty.md", b"")
     rep = client.get(f"/api/v1/analytics/corpus?workspace_id={ws}", headers=h).json()
     assert rep["by_status"] == {"ok": 1, "empty": 1}
+
+
+def test_root_redirects_to_chat_page(client):
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code in (302, 307)
+    assert r.headers["location"] == "/static/chat.html"

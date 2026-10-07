@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app import db, profiling
-from app import answering, llm
+from app import answering, llm, changes, chatting
 from app.config import MAX_UPLOAD_MB, SUPPORTED, UPLOAD_DIR
 from app.ingest import ingest_file
 
@@ -137,6 +137,17 @@ def get_document(version_id: str, user: str = Depends(current_user),
     return row
 
 
+@app.get("/api/v1/changes")
+def version_changes(workspace_id: str, document: str, from_label: str, to_label: str,
+                    user: str = Depends(current_user), con=Depends(get_con)):
+    """Section-by-section difference between two versions of one document."""
+    require_workspace(con, workspace_id, user)
+    res = changes.compare(con, workspace_id, document, from_label, to_label)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Document or versions not found")
+    return res
+
+
 @app.get("/api/v1/analytics/corpus")
 def corpus_analytics(workspace_id: str, user: str = Depends(current_user),
                      con=Depends(get_con)):
@@ -187,6 +198,40 @@ def query(body: QueryIn, user: str = Depends(current_user), con=Depends(get_con)
         raise HTTPException(503, str(e))
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
+class ChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    workspace_id: str | None = None
+    scope: Literal["auto", "documents", "general"] = "auto"
+    mode: Literal["keyword", "vector", "auto"] = "auto"       # retrieval mode for documents
+    k: int = Field(default=4, ge=1, le=8)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=40)
+
+
+@app.post("/api/v1/chat")
+def chat(body: ChatIn, user: str = Depends(current_user), con=Depends(get_con)):
+    """Chat with Nexus: documents first (auto), documents only, or general knowledge."""
+    try:
+        return chatting.reply(con, body.workspace_id, user, body.message, body.history,
+                              body.scope, body.mode, body.k)
+    except chatting.WorkspaceNotFound:
+        raise HTTPException(404, "Workspace not found")
+    except chatting.RateLimited:
+        raise HTTPException(429, "Too many requests right now. Please wait a minute and try again.")
+    except llm.LLMUnavailable as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/api/v1/model")
+def model_info():
+    """Which language model is active (never includes the API key)."""
+    return llm.describe()
+
+
 @app.get("/api/v1/runs/{run_id}")
 def get_run(run_id: str, user: str = Depends(current_user), con=Depends(get_con)):
     row = con.execute("SELECT * FROM query_runs WHERE run_id=%s AND user_id=%s",
@@ -218,3 +263,16 @@ analytics.register(app, get_con, current_user, require_workspace)
 
 from app import explorer
 explorer.register(app)
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+
+
+from fastapi.responses import RedirectResponse
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Opening the bare server address (e.g. the ngrok link) lands on the chat page."""
+    return RedirectResponse("/static/chat.html")

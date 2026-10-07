@@ -16,3 +16,13 @@ def test_every_route_has_a_reason():
     assert classify("How slow were the slowest requests?")[1]
 def test_version_question_stays_on_vector():
     assert classify("What changed in v3?")[0] == "vector"
+
+
+def test_numbered_reference_routes_to_hybrid():
+    assert classify("Explain practice query set 15 in simple language.")[0] == "hybrid"
+    assert classify("What does step 7 say about backups?")[0] == "hybrid"
+
+
+def test_version_words_do_not_trigger_the_numbered_rule():
+    assert classify("What is in version 2 of the architecture?")[0] == "vector"
+    assert classify("What changed in v3?")[0] == "vector"
