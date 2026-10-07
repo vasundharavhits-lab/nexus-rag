@@ -1,0 +1,94 @@
+{
+  "keyword/structure": {
+    "recall@1": 0.733,
+    "recall@3": 0.767,
+    "recall@5": 0.833,
+    "mrr": 0.765,
+    "missed": [
+      "Which design shipped everything as one deployable unit?",
+      "Which release moved document processing into a background component?",
+      "Where must a reference lead the reader?",
+      "How slow were the slowest requests during testing?",
+      "Why did the team adopt semantic retrieval?"
+    ],
+    "ms_per_query": 1.9
+  },
+  "keyword/fixed": {
+    "recall@1": 0.7,
+    "recall@3": 0.8,
+    "recall@5": 0.8,
+    "mrr": 0.739,
+    "missed": [
+      "What are the action items from the March meeting?",
+      "Which design shipped everything as one deployable unit?",
+      "Which release moved document processing into a background component?",
+      "What step reorders results after the first retrieval pass?",
+      "Where must a reference lead the reader?",
+      "Why did the team adopt semantic retrieval?"
+    ],
+    "ms_per_query": 1.0
+  },
+  "vector/structure": {
+    "recall@1": 0.833,
+    "recall@3": 0.9,
+    "recall@5": 0.967,
+    "mrr": 0.874,
+    "missed": [
+      "Which design shipped everything as one deployable unit?"
+    ],
+    "ms_per_query": 33.2
+  },
+  "vector/fixed": {
+    "recall@1": 0.567,
+    "recall@3": 0.933,
+    "recall@5": 1.0,
+    "mrr": 0.732,
+    "missed": [],
+    "ms_per_query": 16.3
+  },
+  "hybrid/structure": {
+    "recall@1": 0.667,
+    "recall@3": 0.867,
+    "recall@5": 0.9,
+    "mrr": 0.769,
+    "missed": [
+      "Which design shipped everything as one deployable unit?",
+      "Which release moved document processing into a background component?",
+      "Why did the team adopt semantic retrieval?"
+    ],
+    "ms_per_query": 20.4
+  },
+  "hybrid/fixed": {
+    "recall@1": 0.7,
+    "recall@3": 0.9,
+    "recall@5": 0.933,
+    "mrr": 0.781,
+    "missed": [
+      "What step reorders results after the first retrieval pass?",
+      "Why did the team adopt semantic retrieval?"
+    ],
+    "ms_per_query": 16.4
+  },
+  "rerank/structure": {
+    "recall@1": 0.833,
+    "recall@3": 0.833,
+    "recall@5": 0.833,
+    "mrr": 0.833,
+    "missed": [
+      "What are the action items from the March meeting?",
+      "Which design shipped everything as one deployable unit?",
+      "Which release moved document processing into a background component?",
+      "Where must a reference lead the reader?",
+      "Why did the team adopt semantic retrieval?"
+    ],
+    "ms_per_query": 126.5
+  },
+  "rerank/fixed": {
+    "recall@1": 0.767,
+    "recall@3": 0.9,
+    "recall@5": 1.0,
+    "mrr": 0.851,
+    "missed": [],
+    "ms_per_query": 302.6
+  }
+}

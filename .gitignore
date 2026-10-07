@@ -2,21 +2,14 @@
 __pycache__/
 .pytest_cache/
 db/*.db
-data/raw/*
 data/uploads/
-reports/*
 .ipynb_checkpoints/
 .env
 .env.txt
 .docker/
 
-.venv/
-__pycache__/
 *.pyc
-.pytest_cache/
-data/uploads/
 db/nexus.db
-.env
 *.bak
 *.bak2
 HAND_APPLY.*

@@ -1,0 +1,14 @@
+# Ingestion Quality Report
+Generated: 2026-10-01T05:20:01.997667+00:00
+
+- **total_files_seen**: 13
+- **unsupported_files**: []
+- **by_status**: {'ok': 11, 'failed': 1, 'empty': 1}
+- **by_file_type**: {'md': 10, 'pdf': 2, 'docx': 1}
+- **by_language**: {'en': 10, 'unknown': 3}
+- **missing_metadata_pct**: {'doc_status': 69.2, 'effective_at': 23.1, 'author': 76.9}
+- **exact_duplicate_groups**: [['decisions.md', 'decisions_copy.md']]
+- **near_duplicate_pairs**: [('meeting_2026_03.md', 'meeting_2026_03_final.md', 0.941)]
+- **flagged_documents**: ['broken_report.pdf', 'empty_notes.md', 'incident_log.md', 'requirements_v2.docx', 'short_note.md', 'test_report_v1.pdf']
+- **failures**: [{'filename': 'broken_report.pdf', 'error': 'PdfStreamError: Stream has ended unexpectedly'}]
+- **median_words**: 30.0

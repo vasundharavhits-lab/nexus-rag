@@ -1,0 +1,512 @@
+{
+  "raw": {
+    "documents": 11,
+    "pairs": 55,
+    "true_duplicates": 2,
+    "sweep": [
+      {
+        "threshold": 0.3,
+        "tp": 2,
+        "fp": 1,
+        "fn": 0,
+        "precision": 0.667,
+        "recall": 1.0,
+        "f1": 0.8
+      },
+      {
+        "threshold": 0.4,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      {
+        "threshold": 0.5,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      {
+        "threshold": 0.6,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      {
+        "threshold": 0.7,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      {
+        "threshold": 0.8,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      {
+        "threshold": 0.9,
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    ],
+    "current": {
+      "threshold": 0.6,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "min_dup_sim": 0.941,
+    "max_nondup_sim": 0.353,
+    "midpoint_threshold": 0.65,
+    "errors_at_current": []
+  },
+  "raw2": {
+    "documents": 30,
+    "pairs": 435,
+    "true_duplicates": 30,
+    "sweep": [
+      {
+        "threshold": 0.3,
+        "tp": 30,
+        "fp": 63,
+        "fn": 0,
+        "precision": 0.323,
+        "recall": 1.0,
+        "f1": 0.488
+      },
+      {
+        "threshold": 0.4,
+        "tp": 30,
+        "fp": 54,
+        "fn": 0,
+        "precision": 0.357,
+        "recall": 1.0,
+        "f1": 0.526
+      },
+      {
+        "threshold": 0.5,
+        "tp": 30,
+        "fp": 54,
+        "fn": 0,
+        "precision": 0.357,
+        "recall": 1.0,
+        "f1": 0.526
+      },
+      {
+        "threshold": 0.6,
+        "tp": 30,
+        "fp": 49,
+        "fn": 0,
+        "precision": 0.38,
+        "recall": 1.0,
+        "f1": 0.55
+      },
+      {
+        "threshold": 0.7,
+        "tp": 30,
+        "fp": 10,
+        "fn": 0,
+        "precision": 0.75,
+        "recall": 1.0,
+        "f1": 0.857
+      },
+      {
+        "threshold": 0.8,
+        "tp": 30,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      {
+        "threshold": 0.9,
+        "tp": 30,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    ],
+    "current": {
+      "threshold": 0.6,
+      "tp": 30,
+      "fp": 49,
+      "fn": 0,
+      "precision": 0.38,
+      "recall": 1.0,
+      "f1": 0.55
+    },
+    "min_dup_sim": 0.959,
+    "max_nondup_sim": 0.743,
+    "midpoint_threshold": 0.85,
+    "errors_at_current": [
+      {
+        "a": "data_governance_policy.docx",
+        "b": "enterprise_architecture.docx",
+        "sim": 0.674,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.docx",
+        "b": "enterprise_architecture.md",
+        "sim": 0.676,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.docx",
+        "b": "enterprise_architecture.pdf",
+        "sim": 0.66,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.docx",
+        "b": "incident_reports.docx",
+        "sim": 0.616,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.docx",
+        "b": "incident_reports.md",
+        "sim": 0.622,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.docx",
+        "b": "research_evaluation.docx",
+        "sim": 0.649,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.docx",
+        "b": "research_evaluation.md",
+        "sim": 0.653,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.docx",
+        "b": "research_evaluation.pdf",
+        "sim": 0.633,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "enterprise_architecture.docx",
+        "sim": 0.681,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "enterprise_architecture.md",
+        "sim": 0.682,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "enterprise_architecture.pdf",
+        "sim": 0.666,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "incident_reports.docx",
+        "sim": 0.621,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "incident_reports.md",
+        "sim": 0.627,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "research_evaluation.docx",
+        "sim": 0.656,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "research_evaluation.md",
+        "sim": 0.66,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.md",
+        "b": "research_evaluation.pdf",
+        "sim": 0.64,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.pdf",
+        "b": "enterprise_architecture.docx",
+        "sim": 0.644,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.pdf",
+        "b": "enterprise_architecture.md",
+        "sim": 0.645,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.pdf",
+        "b": "enterprise_architecture.pdf",
+        "sim": 0.633,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.pdf",
+        "b": "research_evaluation.docx",
+        "sim": 0.618,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.pdf",
+        "b": "research_evaluation.md",
+        "sim": 0.622,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "data_governance_policy.pdf",
+        "b": "research_evaluation.pdf",
+        "sim": 0.608,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.docx",
+        "b": "incident_reports.docx",
+        "sim": 0.693,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.docx",
+        "b": "incident_reports.md",
+        "sim": 0.698,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.docx",
+        "b": "incident_reports.pdf",
+        "sim": 0.658,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.docx",
+        "b": "research_evaluation.docx",
+        "sim": 0.74,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.docx",
+        "b": "research_evaluation.md",
+        "sim": 0.741,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.docx",
+        "b": "research_evaluation.pdf",
+        "sim": 0.721,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.md",
+        "b": "incident_reports.docx",
+        "sim": 0.694,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.md",
+        "b": "incident_reports.md",
+        "sim": 0.7,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.md",
+        "b": "incident_reports.pdf",
+        "sim": 0.66,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.md",
+        "b": "research_evaluation.docx",
+        "sim": 0.742,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.md",
+        "b": "research_evaluation.md",
+        "sim": 0.743,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.md",
+        "b": "research_evaluation.pdf",
+        "sim": 0.723,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.pdf",
+        "b": "incident_reports.docx",
+        "sim": 0.675,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.pdf",
+        "b": "incident_reports.md",
+        "sim": 0.68,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.pdf",
+        "b": "incident_reports.pdf",
+        "sim": 0.644,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.pdf",
+        "b": "research_evaluation.docx",
+        "sim": 0.725,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.pdf",
+        "b": "research_evaluation.md",
+        "sim": 0.726,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "enterprise_architecture.pdf",
+        "b": "research_evaluation.pdf",
+        "sim": 0.709,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.docx",
+        "b": "research_evaluation.docx",
+        "sim": 0.66,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.docx",
+        "b": "research_evaluation.md",
+        "sim": 0.664,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.docx",
+        "b": "research_evaluation.pdf",
+        "sim": 0.64,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.md",
+        "b": "research_evaluation.docx",
+        "sim": 0.667,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.md",
+        "b": "research_evaluation.md",
+        "sim": 0.671,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.md",
+        "b": "research_evaluation.pdf",
+        "sim": 0.646,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.pdf",
+        "b": "research_evaluation.docx",
+        "sim": 0.625,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.pdf",
+        "b": "research_evaluation.md",
+        "sim": 0.629,
+        "exact": false,
+        "label": false
+      },
+      {
+        "a": "incident_reports.pdf",
+        "b": "research_evaluation.pdf",
+        "sim": 0.609,
+        "exact": false,
+        "label": false
+      }
+    ]
+  }
+}

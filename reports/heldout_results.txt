@@ -1,0 +1,31 @@
+﻿Gate threshold: 0.6
+
+ANSWERABLE
+  rank=1    gate=0.576  REFUSED vector Which design revision brought in an in-memory cache?
+  rank=1    gate=0.660  pass    vector Where does the second design keep its semantic vectors?
+  rank=4    gate=0.622  pass    vector Before embeddings existed, how did the system find documents?
+  rank=1    gate=0.680  pass    vector Which component handles caching and queued jobs?
+  rank=1    gate=0.782  pass    vector How long can the parser take before an upload fails?
+  rank=1    gate=0.758  pass    vector What should be done when a reindex collides with a table lock?
+  rank=1    gate=0.714  pass    vector Which command repairs the index after switching embedding models?
+  rank=1    gate=0.725  pass    vector What did the team examine about response speed in March?
+  rank=1    gate=0.747  pass    vector Which requirement covers declining to answer without proof?
+  rank=1    gate=0.756  pass    vector Which document formats did the ingestion test run cover?
+  rank=1    gate=0.713  pass    vector Did the 95th percentile response time stay under a limit?
+  rank=1    gate=0.724  pass    vector Why did the prototype avoid a dedicated vector store?
+  rank=4    gate=0.657  pass    vector When did ingestion stop sharing a process with the API?
+  rank=1    gate=0.761  pass    vector Which stage was added after hybrid retrieval?
+  rank=2    gate=0.671  pass    vector Which tool runs ingestion tasks outside the web service?
+  Recall@1 0.80   Recall@4 1.00   MRR 0.867
+  passed the gate: 14/15
+
+UNANSWERABLE
+  gate=0.552  REFUSED         vector How many users does the platform have?
+  gate=0.573  REFUSED         vector Which cloud provider hosts the system?
+  gate=0.509  REFUSED         vector What license is the project released under?
+  gate=0.548  REFUSED         vector Who approved the architecture document?
+  gate=0.617  PASSED (wrong)  vector What is the maximum file size for uploads?
+  gate=0.576  REFUSED         vector What happened in the April incident review meeting?
+  gate=0.565  REFUSED         vector What is the average response time of the Celery workers?
+  gate=0.565  REFUSED         vector Translate the architecture overview into French.
+  refused by the gate: 7/8
