@@ -152,3 +152,29 @@ Full tables and limitations are in the report (`Nexus_RAG_Project_report.docx`).
 - Version detection uses keywords, so a version question without trigger words is treated as having no version intent.
 - The verifier can raise false alarms on true answers. Its splitting rule is a simple heuristic that only handles list sentences and two clear clauses, so other compound sentences are still checked as one claim. It is cheap once loaded (median about 0.46 s per answer, against about 13 s for the language model), but the first call takes about 41 s to load the model.
 - The prompt-injection test covers one document and one attack.
+
+## How to run
+
+Requirements: Python 3.11+, PostgreSQL, and [Ollama](https://ollama.com).
+
+1. Create an empty PostgreSQL database, for example `nexus`.
+2. Copy `.env.example` to `.env` and set the connection string:
+   `DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/nexus`
+   (optional: `OLLAMA_URL`, default `http://localhost:11434`, and `LLM_MODEL`, default `qwen2.5:3b`).
+3. Install and pull the model:
+```
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -r requirements.txt
+   ollama pull qwen2.5:3b
+```
+4. Start the app (the tables are created on startup):
+```
+   uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+5. Open http://127.0.0.1:8000, click the gear icon, press "New workspace", upload a PDF, DOCX or Markdown file with the paperclip, and ask a question.
+
+The first question is slow while the embedding and claim-check models load. Answers that use the language model take 10 to 40 seconds on a CPU.
+
+Tests: `python -m pytest -q` (156 tests; they need the database).
+Reproduce the results: `python -m scripts.run_heldout`, `python -m scripts.run_benchmark`, `python -m scripts.run_ablation`.
