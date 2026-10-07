@@ -9,3 +9,14 @@ reports/*
 .env
 .env.txt
 .docker/
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/uploads/
+db/nexus.db
+.env
+*.bak
+*.bak2
+HAND_APPLY.*
