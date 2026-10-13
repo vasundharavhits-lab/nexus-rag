@@ -91,7 +91,11 @@ def pdf_sections(page_texts):
         flush()
     return sections
 
-def parse_pdf(path) -> tuple[list[dict], int]:
+def pdf_page_texts(path) -> list[str]:
+    """Text of every page ('' for a page with no text layer, e.g. a scan)."""
     reader = PdfReader(str(path))       # raises on corrupted files; caller handles it
-    texts = [(page.extract_text() or "").strip() for page in reader.pages]
-    return pdf_sections(texts), len(reader.pages)
+    return [(page.extract_text() or "").strip() for page in reader.pages]
+
+def parse_pdf(path) -> tuple[list[dict], int]:
+    texts = pdf_page_texts(path)
+    return pdf_sections(texts), len(texts)

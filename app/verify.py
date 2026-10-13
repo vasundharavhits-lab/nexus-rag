@@ -1,5 +1,6 @@
 # app/verify.py
 import re
+import threading
 import numpy as np
 
 MODEL_NAME = "cross-encoder/nli-deberta-v3-small"
@@ -16,36 +17,20 @@ _SPLIT = re.compile(r"\s*;\s*|,\s+and\s+|,\s+|\s+and\s+")
 # other sentences (measured: 0.01 on the whole chunk, 0.99 on the sentence alone), so each
 # source is also checked as single sentences and neighbouring pairs; the best score wins.
 WINDOW_TOPK = 6     # windows kept per source (most word overlap with the claim)
-STAGE2_TOPK = 3     # windows kept for sources the answer did not cite (cheaper)
 _SENT_END = re.compile(r"(?<=[.!?])\s+")
 _STOP = {"the", "a", "an", "of", "to", "in", "and", "or", "is", "are", "was", "were", "be",
          "for", "on", "with", "by", "as", "at", "that", "this", "it", "its", "from", "which"}
 
-# Status and version words in a claim ("the draft ...", "According to v2, ...") describe the
-# document, not its content. The NLI model ignores them (measured: a claim naming the wrong
-# status still scored 0.99), so they are removed before scoring and compared with the cited
-# source's own metadata instead. Only clear attribution phrases count; ordinary content words
-# such as "Draft documents should be reviewed" are left alone.
-_STATUS = r"draft|approved|archived|withdrawn|superseded|deprecated|obsolete"
-_DOCNOUN = r"(?:version|document|doc|copy|release|edition|revision)"
-_SUBJ_VERBS = ("is|was|has|had|uses|used|includes|adds|stores|relies|supports|describes|states|"
-               "says|defines|requires|contains|introduces|combines|handles|runs|provides|"
-               "mentions|lists|keeps|specifies")
-_LEAD = re.compile(
-    rf"^\s*(?:according to|in|per|from|based on)\s+(?:the\s+)?"
-    rf"(?:({_STATUS})(?:\s+{_DOCNOUN})?|v(\d+)|version\s*(\d+))\s*,\s*", re.I)
-_SUBJ = re.compile(
-    rf"^\s*the\s+({_STATUS})(?:\s+{_DOCNOUN})?\s+(?=(?:{_SUBJ_VERBS})\b)", re.I)
-_VERS = re.compile(r"(?<![/.\-])\bv(\d+)(?!\.\d|\d|/)|\bversion\s*(\d+)(?!\.\d)\b", re.I)
-
 _model = None
+_model_lock = threading.Lock()
 
 def get_model():
     global _model
-    if _model is None:
-        from sentence_transformers import CrossEncoder
-        _model = CrossEncoder(MODEL_NAME)
-    return _model
+    with _model_lock:
+        if _model is None:
+            from sentence_transformers import CrossEncoder
+            _model = CrossEncoder(MODEL_NAME)
+        return _model
 
 def _verb_index(words):
     for i, w in enumerate(words):
@@ -56,8 +41,6 @@ def _verb_index(words):
 def split_compound(text, max_parts=6):
     """Split one sentence into smaller claims. Returns [text] when unsure."""
     body = text.strip().rstrip(".!?").strip()
-    if _LEAD.match(body):          # "According to v2, ..." is one claim about a document
-        return [body]
     segs = [s.strip() for s in _SPLIT.split(body) if s and s.strip()]
     if len(segs) < 2 or len(segs) > max_parts:
         return [body]
@@ -100,58 +83,6 @@ def split_claims(answer):
                 out.append({"text": sub + end, "cited": s["cited"]})
     return out
 
-def split_qualifiers(claim):
-    """Return (text to score, versions named, statuses named). The text is unchanged when
-    the claim names no status or version."""
-    versions, statuses = set(), set()
-    text = claim
-    m = _LEAD.match(text)
-    if m:
-        if m.group(1):
-            statuses.add(m.group(1).lower())
-        n = m.group(2) or m.group(3)
-        if n:
-            versions.add(f"v{int(n)}")
-        text = text[m.end():]
-    m = _SUBJ.match(text)
-    if m:
-        statuses.add(m.group(1).lower())
-        text = "The system " + text[m.end():]
-
-    def _ver(mm):
-        versions.add(f"v{int(mm.group(1) or mm.group(2))}")
-        return "the system"
-
-    text = _VERS.sub(_ver, text)
-    if not (versions or statuses):
-        return claim, [], []
-    text = text.strip()
-    if len(text.split()) < 3:
-        text = claim
-    elif text[0].islower():
-        text = text[0].upper() + text[1:]
-    return text, sorted(versions), sorted(statuses)
-
-def meta_mismatch(versions, statuses, cited, meta):
-    """Reasons a claim's version or status words contradict the sources it cites.
-    meta: {n: {"label": ..., "status": ...}}. Nothing to compare -> no reasons."""
-    if not meta or not cited:
-        return []
-    cm = [meta[n] for n in cited if n in meta]
-    if not cm:
-        return []
-    labels = sorted({str(m.get("label") or "unknown") for m in cm})
-    stats = sorted({str(m.get("status") or "unknown") for m in cm})
-    why = []
-    for v in versions:
-        if not any(str(m.get("label") or "").lower() == v for m in cm):
-            why.append(f"the claim names {v}, but the cited source is {', '.join(labels)}")
-    for s in statuses:
-        if not any(s in str(m.get("status") or "").lower() for m in cm):
-            why.append(f"the claim names the {s} document, but the cited source status is "
-                       f"{', '.join(stats)}")
-    return why
-
 def _entailment(pairs):
     logits = get_model().predict(pairs)
     e = np.exp(logits - logits.max(axis=1, keepdims=True))
@@ -170,7 +101,7 @@ def candidate_windows(text, claim, topk=WINDOW_TOPK):
     ranked = sorted(set(wins), key=lambda w: (-len(want & _tokens(w)) / len(want), len(w)))
     return [flat] + [w for w in ranked[:topk] if w != flat]
 
-def best_scores(claim, sources, only=None, topk=WINDOW_TOPK):
+def best_scores(claim, sources, only=None):
     """Entailment of `claim` for each source in `only` (default: all) = best score over that
     source's windows. The whole passage is scored first; the sentence windows are scored
     only for sources where it did not already reach SUPPORT_MIN (saves most of the cost).
@@ -179,7 +110,7 @@ def best_scores(claim, sources, only=None, topk=WINDOW_TOPK):
     best, where = {}, {}
     if not ns:
         return best, where
-    wins = {n: candidate_windows(sources[n], claim, topk) for n in ns}
+    wins = {n: candidate_windows(sources[n], claim) for n in ns}
     for n, s in zip(ns, _entailment([(wins[n][0], claim) for n in ns])):
         best[n], where[n] = float(s), wins[n][0]
     pairs, owners = [], []
@@ -194,26 +125,16 @@ def best_scores(claim, sources, only=None, topk=WINDOW_TOPK):
                 best[n], where[n] = float(s), w
     return best, where
 
-def verify_answer(answer, sources, meta=None):
-    """sources: {n: text}; meta: optional {n: {"label": ..., "status": ...}}.
-    Returns one result per claim."""
+def verify_answer(answer, sources):
+    """sources: {n: text}. Returns one result per claim."""
     results = []
     for c in split_claims(answer):
-        neutral, versions, statuses = split_qualifiers(c["text"])
-        base = {"claim": c["text"], "cited": c["cited"],
-                "checked_as": neutral if neutral != c["text"] else None}
-        why = meta_mismatch(versions, statuses, c["cited"], meta)
-        if why:     # wrong version or status named: no need to ask the model
-            results.append({**base, "verdict": "unsupported", "better_sources": [],
-                            "scores": {}, "support": {}, "note": "; ".join(why)})
-            continue
         # stage 1: the sources the answer cites; stage 2 (only if they fail): the others,
         # to tell "wrong source" from "unsupported"
-        scores, where = best_scores(neutral, sources, c["cited"])
+        scores, where = best_scores(c["text"], sources, c["cited"])
         cited_ok = [n for n in c["cited"] if scores.get(n, 0) >= SUPPORT_MIN]
         if not cited_ok:
-            s2, w2 = best_scores(neutral, sources, [n for n in sources if n not in scores],
-                                 topk=STAGE2_TOPK)
+            s2, w2 = best_scores(c["text"], sources, [n for n in sources if n not in scores])
             scores.update(s2); where.update(w2)
         other_ok = [n for n in scores if n not in c["cited"] and scores[n] >= SUPPORT_MIN]
         if cited_ok:
@@ -222,9 +143,8 @@ def verify_answer(answer, sources, meta=None):
             verdict = "wrong_source"       # true, but cited source doesn't say it
         else:
             verdict = "unsupported"
-        results.append({**base, "verdict": verdict,
+        results.append({"claim": c["text"], "cited": c["cited"], "verdict": verdict,
                         "better_sources": other_ok if verdict == "wrong_source" else [],
                         "scores": {n: round(s, 2) for n, s in scores.items()},
-                        "support": {n: where[n][:200] for n in (cited_ok or other_ok)},
-                        "note": None})
+                        "support": {n: where[n][:200] for n in (cited_ok or other_ok)}})
     return results

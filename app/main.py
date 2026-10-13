@@ -1,4 +1,4 @@
-import time
+import os, threading, time
 from typing import Literal
 from app import indexing, search as search_mod
 import hashlib, uuid
@@ -9,15 +9,29 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app import db, profiling
-from app import answering, llm, changes, chatting
-from app.config import MAX_UPLOAD_MB, SUPPORTED, UPLOAD_DIR
+from app import answering, llm, changes, chatting, jobs, ocr
+from app.config import SUPPORTED, UPLOAD_DIR
+from app.limits import MAX_UPLOAD_MB, WARMUP_MODELS
 from app.ingest import ingest_file
+
+def _warm_up():
+    """Load the search and claim-check models in the background so the first upload and the
+    first answer do not pay the loading time. Failures are ignored: real use reports them."""
+    try:
+        from app import embeddings, verify
+        embeddings._model()
+        verify.get_model()
+    except Exception:
+        pass
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     con = db.connect()
     db.init_db(con)
     con.close()
+    if WARMUP_MODELS and not os.getenv("PYTEST_CURRENT_TEST"):    # never during tests
+        threading.Thread(target=_warm_up, daemon=True).start()
     yield
 
 
@@ -85,27 +99,43 @@ def upload_document(workspace_id: str, file: UploadFile = File(...),
     if not name or ext not in SUPPORTED:
         raise HTTPException(415, f"Unsupported file type. Allowed: {sorted(SUPPORTED)}")
 
+    # Stream to disk in 1 MB pieces while hashing: memory use does not grow with file size.
     limit = MAX_UPLOAD_MB * 1024 * 1024
-    data = file.file.read(limit + 1)
-    if len(data) > limit:
-        raise HTTPException(413, f"File larger than {MAX_UPLOAD_MB} MB")
-
-    chash = hashlib.sha256(data).hexdigest()
     dest_dir = UPLOAD_DIR / workspace_id
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"{chash}{ext}"
-    if not dest.exists():
-        dest.write_bytes(data)
+    tmp = dest_dir / f".upload-{uuid.uuid4().hex}"
+    digest, size = hashlib.sha256(), 0
+    try:
+        with open(tmp, "wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, f"{name} is larger than the {MAX_UPLOAD_MB} MB limit "
+                                             "(the server setting MAX_UPLOAD_MB).")
+                digest.update(chunk)
+                out.write(chunk)
+        dest = dest_dir / f"{digest.hexdigest()}{ext}"
+        if dest.exists():
+            tmp.unlink()
+        else:
+            os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
 
-    rec, secs = ingest_file(dest, workspace_id=workspace_id, original_name=name)
+    rec, secs = ingest_file(dest, workspace_id=workspace_id, original_name=name, defer_ocr=True)
+
+    pending = rec.pop("_ocr", None)                      # scanned PDF: read it in the background
     sections = [{**s, "version_id": rec["version_id"], "idx": i} for i, s in enumerate(secs)]
     db.save(con, workspace_id, [rec], sections)
 
     df = profiling.add_flags(profiling.load_versions(con, workspace_id))
     profiling.save_flags(con, df, workspace_id)
 
-    return {k: rec[k] for k in ("version_id", "document_id", "filename", "label",
-                                "status", "error", "content_hash", "section_count")}
+    job = jobs.submit_ocr(workspace_id, rec, pending["texts"], pending["pages"], dest) if pending else None
+    out = {k: rec[k] for k in ("version_id", "document_id", "filename", "label",
+                               "status", "error", "content_hash", "section_count")}
+    out["job_id"] = job["id"] if job else None
+    return out
 
 
 @app.get("/api/v1/documents")
@@ -158,10 +188,31 @@ def corpus_analytics(workspace_id: str, user: str = Depends(current_user),
     return profiling.build_report(profiling.add_flags(df), [])
 
 @app.post("/api/v1/workspaces/{workspace_id}/index")
-def index_workspace(workspace_id: str, embed: bool = True,
+def index_workspace(workspace_id: str, embed: bool = True, rebuild: bool = False,
+                    strategies: str = "structure", background: bool = False,
                     user: str = Depends(current_user), con=Depends(get_con)):
+    """Index new documents. Already-indexed versions are skipped unless rebuild=true.
+    strategies is "structure" (what search and chat use) and/or "fixed" (ablation only)."""
     require_workspace(con, workspace_id, user)
-    return indexing.index_workspace(con, workspace_id, embed=embed)
+    wanted = tuple(s.strip() for s in strategies.split(",") if s.strip())
+    if not wanted or any(s not in ("structure", "fixed") for s in wanted):
+        raise HTTPException(422, "strategies must be 'structure', 'fixed' or 'structure,fixed'")
+    if background:                                   # big collections: return at once, report progress
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=202, content={"job": jobs.submit_index(workspace_id)})
+    return indexing.index_workspace(con, workspace_id, strategies=wanted, embed=embed,
+                                    only_new=not rebuild)
+
+@app.get("/api/v1/workspaces/{workspace_id}/jobs")
+def workspace_jobs(workspace_id: str, user: str = Depends(current_user), con=Depends(get_con)):
+    """Progress of background work (OCR, indexing) in this workspace."""
+    require_workspace(con, workspace_id, user)
+    return {"jobs": jobs.list_jobs(workspace_id)}
+
+@app.get("/api/v1/limits")
+def limits():
+    """What this server accepts, so the page can tell the user instead of guessing."""
+    return {"max_upload_mb": MAX_UPLOAD_MB, "supported": sorted(SUPPORTED), "ocr": ocr.status()}
 
 
 class SearchIn(BaseModel):

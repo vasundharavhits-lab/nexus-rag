@@ -324,34 +324,72 @@ $('newws').onclick=async()=>{
   catch(e){errMsg('Could not create a workspace. Is the server running?')}
 };
 
+let limits={max_upload_mb:null,ocr:null};
+(async()=>{try{const x=await api('/api/v1/limits');if(x.ok){limits=await x.json();
+  if(limits.ocr&&!limits.ocr.available){const m=$('modelinfo');m.title='Scanned PDFs cannot be read: '+(limits.ocr.reason||'')}}}catch(e){}})();
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const pct=(d,t)=>t?Math.round(100*d/t)+'%':'';
+function describeJob(j){
+  if(j.state==='failed')return j.label+': failed. '+(j.error||'');
+  if(j.state==='done')return j.label+': ready';
+  if(j.stage==='reading scanned pages')return 'Reading scanned pages of '+j.label+': '+j.done+' of '+j.total+' ('+pct(j.done,j.total)+')';
+  if(j.stage==='saving')return 'Saving '+j.label+'...';
+  if(j.stage==='indexing')return 'Building the search index'+(j.total?': '+j.done+' of '+j.total+' passages ('+pct(j.done,j.total)+')':'...');
+  return j.label+': waiting...';
+}
+// Poll until every job we started has finished; show their progress in the status bubble.
+async function watchJobs(ws,ids,note){
+  const every=window.NEXUS_POLL_MS||1500;
+  for(;;){
+    let list=[];
+    try{const x=await api('/api/v1/workspaces/'+encodeURIComponent(ws)+'/jobs',{headers:hdr()});if(x.ok)list=(await x.json()).jobs}catch(e){}
+    const mine=list.filter(j=>ids.has(j.id));
+    if(mine.length)note.querySelector('.b').textContent=mine.map(describeJob).join('\n');
+    if(mine.length&&mine.every(j=>j.state==='done'||j.state==='failed'))return mine;
+    await sleep(every);
+  }
+}
+
 $('file').onchange=async()=>{
   const files=Array.from($('file').files);
   $('file').value='';
   if(!files.length)return;
   const user=$('user').value.trim();
-  const note=info('Uploading '+files.length+' file(s)...');
+  const note=info('Uploading '+files.length+' file(s)... large files can take a while to arrive.');
   let ws=$('ws').value.trim();
   try{if(!ws)ws=await createWorkspace()}catch(e){note.remove();errMsg('Could not create a workspace for your files. Is the server running?');return}
-  let ok=0;
+  const maxB=limits.max_upload_mb?limits.max_upload_mb*1048576:null;
+  const ids=new Set();let ready=0,reading=0;
   for(const f of files){
+    if(maxB&&f.size>maxB){errMsg(f.name+' is '+Math.round(f.size/1048576)+' MB, but this server accepts files up to '+limits.max_upload_mb+' MB. Ask the owner to raise MAX_UPLOAD_MB in the .env file.');continue}
     try{
       const fd=new FormData();fd.append('file',f);
       const x=await api('/api/v1/documents/upload?workspace_id='+encodeURIComponent(ws),{method:'POST',headers:{'X-User-Id':user},body:fd});
       const j=await x.json().catch(()=>({}));
-      if(x.ok&&j.status==='ok'){ok++}
-      else if(x.ok){errMsg(f.name+' was saved but no text could be read from it ('+(j.status||'unknown')+'). Scanned PDFs without text cannot be used.')}
+      if(x.ok&&j.status==='ok'){ready++}
+      else if(x.ok&&j.status==='processing'){reading++;if(j.job_id)ids.add(j.job_id)}
+      else if(x.ok){errMsg(f.name+' was saved, but no text could be read from it. '+(j.error||''))}
       else if(x.status===415){errMsg(f.name+': only .md, .pdf and .docx files are supported.')}
-      else if(x.status===413){errMsg(f.name+' is larger than 20 MB.')}
+      else if(x.status===413){errMsg(j.detail||(f.name+' is too large for this server.'))}
       else if(x.status===404){errMsg('Workspace not found for this user. Check the user and workspace in settings.')}
       else{errMsg(f.name+': upload failed ('+x.status+').')}
     }catch(e){errMsg(f.name+': could not reach the server.')}
   }
-  if(!ok){note.remove();return}
-  note.querySelector('.b').textContent='Reading your files and building the search index. This can take a minute...';
+  if(!ready&&!reading){note.remove();return}
+  const t0=Date.now();
+  note.querySelector('.b').textContent='Starting...';
   try{
-    const x=await api('/api/v1/workspaces/'+encodeURIComponent(ws)+'/index',{method:'POST',headers:{'X-User-Id':user}});
-    if(!x.ok)throw new Error(x.status);
-    note.querySelector('.b').textContent=ok+' file(s) added and indexed. You can ask questions about them now.';
+    if(ready){
+      const x=await api('/api/v1/workspaces/'+encodeURIComponent(ws)+'/index?background=true',{method:'POST',headers:{'X-User-Id':user}});
+      if(!x.ok)throw new Error(x.status);
+      ids.add((await x.json()).job.id);
+    }
+    const done=await watchJobs(ws,ids,note);
+    const bad=done.filter(j=>j.state==='failed');
+    bad.forEach(j=>errMsg(j.label+' could not be processed: '+(j.error||'unknown error')));
+    const secs=Math.round((Date.now()-t0)/1000);
+    note.querySelector('.b').textContent=(bad.length===done.length?'No files were added.':(ready+reading-bad.filter(j=>j.kind==='ocr').length)+' file(s) added and indexed in '+secs+' s. You can ask questions about them now.');
   }catch(e){note.remove();errMsg('Files were uploaded but indexing failed. Check the server window for the error.')}
 };
 

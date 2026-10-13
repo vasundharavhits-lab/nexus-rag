@@ -19,7 +19,7 @@ MIN_WORDS = 30
 
 CHUNK_MAX_WORDS = 180       # words, used as a rough proxy for tokens
 CHUNK_OVERLAP_WORDS = 30    # overlap when a single paragraph must be split
-EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 
 # --- Language model -------------------------------------------------------------------
 # LLM_PROVIDER=ollama  -> a local Ollama server (default), LLM_MODEL is any model you pulled
@@ -40,7 +40,7 @@ CHAT_TEMPERATURE = float(os.getenv("CHAT_TEMPERATURE", "0.7"))
 CHAT_RATE_LIMIT_PER_MIN = int(os.getenv("CHAT_RATE_LIMIT_PER_MIN", "30"))
 CHAT_HISTORY_MESSAGES = 10    # most recent messages sent back to the model
 CHAT_HISTORY_CHARS = 12000
-MIN_VECTOR_SCORE = 0.60
+MIN_VECTOR_SCORE = 0.79
 def ensure_dirs():
     for d in (RAW_DIR, UPLOAD_DIR, REPORT_DIR):
         d.mkdir(parents=True, exist_ok=True)
