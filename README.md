@@ -16,7 +16,7 @@ A small retrieval-augmented question answering system for technical project docu
 
 - Windows, macOS or Linux with Python 3.11 or newer (developed on Python 3.14)
 - PostgreSQL (the pgvector extension is not required)
-- [Ollama](https://ollama.com) with the model `qwen2.5:3b`
+- [Ollama](https://ollama.com) with the model `qwen2.5:14b`
 - About 2 GB of disk space for the Python packages and the embedding and verification models, which are downloaded on first use
 
 ## Setup
