@@ -1,0 +1,40 @@
+﻿.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+rag_out/
+*.zip
+279_chunks.jsonl
+final_chunks.jsonl
+# Python environments
+.venv/
+venv/
+env/
+
+# Secrets
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Editors and operating system
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and local databases
+*.log
+*.sqlite
+*.sqlite3
+.docker/
+data/uploads/
+data/raw/
+data/raw2/
+*.mp4
+*.lnk
+*.bak*
+*.before_*
+* (*).py

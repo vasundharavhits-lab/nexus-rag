@@ -1,0 +1,1197 @@
+--- a/app/main.py
++++ b/app/main.py
+@@ -1,11 +1,12 @@
+ import time
+ from typing import Literal
+-from app import indexing, search as search_mod
++from app import indexing, jobs, ocr, search as search_mod
+ import hashlib, uuid
+ from contextlib import asynccontextmanager
+ from pathlib import Path
+ 
+ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
++from fastapi.responses import JSONResponse
+ from pydantic import BaseModel, Field
+ 
+ from app import db, profiling
+@@ -75,9 +76,103 @@
+             "access_policy": "private"}
+ 
+ 
++def _save_stream(file: UploadFile, dest_dir: Path, ext: str):
++    """Copy the upload to disk 1 MB at a time while hashing it, so memory use stays flat whether
++    the file is 1 MB or 1 GB. The limit (MAX_UPLOAD_MB in .env, 0 = no limit) is enforced while
++    streaming, so an oversized file is rejected early and never stored."""
++    dest_dir.mkdir(parents=True, exist_ok=True)
++    limit = MAX_UPLOAD_MB * 1024 * 1024 if MAX_UPLOAD_MB > 0 else None
++    tmp = dest_dir / f".upload-{uuid.uuid4().hex}.part"
++    h, size = hashlib.sha256(), 0
++    try:
++        with open(tmp, "wb") as out:
++            while True:
++                block = file.file.read(1 << 20)
++                if not block:
++                    break
++                size += len(block)
++                if limit and size > limit:
++                    raise HTTPException(413, f"File larger than {MAX_UPLOAD_MB} MB")
++                h.update(block)
++                out.write(block)
++        chash = h.hexdigest()
++        dest = dest_dir / f"{chash}{ext}"
++        if dest.exists():
++            tmp.unlink()
++        else:
++            tmp.replace(dest)
++        return dest, size
++    except BaseException:
++        tmp.unlink(missing_ok=True)
++        raise
++
++
++_RESULT_KEYS = ("version_id", "document_id", "filename", "label", "status", "error",
++                "content_hash", "section_count")
++_STAGE_LABEL = {"reading": "Reading pages", "ocr": "Reading scanned pages (OCR)",
++                "indexing": "Building the search index"}
++
++
++def _refresh_quality_flags(con, workspace_id):
++    df = profiling.add_flags(profiling.load_versions(con, workspace_id))
++    profiling.save_flags(con, df, workspace_id)
++
++
++def _process_upload(job_id, dest, workspace_id, name):
++    """Runs in a background thread: parse (and OCR if needed), save, then index this file only."""
++    def prog(stage, done, total):
++        jobs.update(job_id, stage=stage, done=done, total=total,
++                    message=f"{_STAGE_LABEL.get(stage, stage)}: {done} of {total}")
++
++    con = db.connect()
++    try:
++        jobs.update(job_id, stage="reading", message="Reading the file")
++        rec, secs = ingest_file(dest, workspace_id=workspace_id, original_name=name,
++                                progress=prog)
++        sections = [{**s, "version_id": rec["version_id"], "idx": i}
++                    for i, s in enumerate(secs)]
++        jobs.update(job_id, stage="saving", message="Saving")
++        db.save(con, workspace_id, [rec], sections)
++        _refresh_quality_flags(con, workspace_id)
++        result = {k: rec[k] for k in _RESULT_KEYS}
++        result["ocr_pages"] = rec.get("ocr_pages", 0)
++        if rec["status"] == "ok":
++            indexing.index_versions(con, [rec["version_id"]],
++                                    progress=lambda strat, d, t: prog("indexing", d, t))
++            jobs.update(job_id, state="done", stage="done", result=result,
++                        message="Ready. You can ask questions about this file now.")
++        else:
++            jobs.update(job_id, state="done", stage="done", result=result, error=rec["error"],
++                        message=rec["error"] or f"No text could be read ({rec['status']}).")
++    finally:
++        con.close()
++
++
++@app.get("/api/v1/limits")
++def limits():
++    """What this server accepts. The web page reads this, so nothing is hard-coded there."""
++    st = ocr.ocr_status()
++    return {"max_upload_mb": MAX_UPLOAD_MB,           # 0 = no limit
++            "supported": sorted(SUPPORTED),
++            "ocr": {"available": st["available"], "languages": st["langs"],
++                    "missing_languages": st["missing"], "reason": st["reason"]}}
++
++
++@app.get("/api/v1/jobs/{job_id}")
++def job_status(job_id: str, user: str = Depends(current_user)):
++    job = jobs.get(job_id, user)
++    if not job:
++        raise HTTPException(404, "Job not found")
++    return {k: v for k, v in job.items() if k != "owner"}
++
++
+ @app.post("/api/v1/documents/upload", status_code=201)
+-def upload_document(workspace_id: str, file: UploadFile = File(...),
++def upload_document(workspace_id: str, background: bool = False,
++                    file: UploadFile = File(...),
+                     user: str = Depends(current_user), con=Depends(get_con)):
++    """background=false (default): process before answering, as before.
++    background=true: save the file, answer 202 with a job_id and keep working in the background
++    (use this for big files and scans; poll GET /api/v1/jobs/{job_id})."""
+     require_workspace(con, workspace_id, user)
+ 
+     name = Path(file.filename or "").name
+@@ -85,27 +180,19 @@
+     if not name or ext not in SUPPORTED:
+         raise HTTPException(415, f"Unsupported file type. Allowed: {sorted(SUPPORTED)}")
+ 
+-    limit = MAX_UPLOAD_MB * 1024 * 1024
+-    data = file.file.read(limit + 1)
+-    if len(data) > limit:
+-        raise HTTPException(413, f"File larger than {MAX_UPLOAD_MB} MB")
++    dest, _size = _save_stream(file, UPLOAD_DIR / workspace_id, ext)
+ 
+-    chash = hashlib.sha256(data).hexdigest()
+-    dest_dir = UPLOAD_DIR / workspace_id
+-    dest_dir.mkdir(parents=True, exist_ok=True)
+-    dest = dest_dir / f"{chash}{ext}"
+-    if not dest.exists():
+-        dest.write_bytes(data)
++    if background:
++        jid = jobs.create(user, workspace_id, name)
++        jobs.submit(jid, _process_upload, jid, dest, workspace_id, name)
++        return JSONResponse(status_code=202,
++                            content={"job_id": jid, "filename": name, "state": "queued"})
+ 
+     rec, secs = ingest_file(dest, workspace_id=workspace_id, original_name=name)
+     sections = [{**s, "version_id": rec["version_id"], "idx": i} for i, s in enumerate(secs)]
+     db.save(con, workspace_id, [rec], sections)
+-
+-    df = profiling.add_flags(profiling.load_versions(con, workspace_id))
+-    profiling.save_flags(con, df, workspace_id)
+-
+-    return {k: rec[k] for k in ("version_id", "document_id", "filename", "label",
+-                                "status", "error", "content_hash", "section_count")}
++    _refresh_quality_flags(con, workspace_id)
++    return {k: rec[k] for k in _RESULT_KEYS}
+ 
+ 
+ @app.get("/api/v1/documents")
+@@ -158,10 +245,11 @@
+     return profiling.build_report(profiling.add_flags(df), [])
+ 
+ @app.post("/api/v1/workspaces/{workspace_id}/index")
+-def index_workspace(workspace_id: str, embed: bool = True,
++def index_workspace(workspace_id: str, embed: bool = True, only_missing: bool = False,
+                     user: str = Depends(current_user), con=Depends(get_con)):
+     require_workspace(con, workspace_id, user)
+-    return indexing.index_workspace(con, workspace_id, embed=embed)
++    return indexing.index_workspace(con, workspace_id, embed=embed,
++                                    only_missing=only_missing)
+ 
+ 
+ class SearchIn(BaseModel):
+--- a/app/config.py
++++ b/app/config.py
+@@ -11,9 +11,34 @@
+ REPORT_DIR = ROOT / "reports"
+ 
+ DATABASE_URL = os.getenv("DATABASE_URL", "")
+-MAX_UPLOAD_MB = 20
++def _env_int(name, default):
++    try:
++        return int(os.getenv(name, str(default)).strip())
++    except ValueError:
++        return default
+ 
+-SUPPORTED = {".md", ".docx", ".pdf"}
++def _env_bool(name, default):
++    return os.getenv(name, "1" if default else "0").strip().lower() in ("1", "true", "yes", "on")
++
++# --- Large files ------------------------------------------------------------------------
++# Set in .env, nothing is fixed in the code.  MAX_UPLOAD_MB=0 means "no limit".
++MAX_UPLOAD_MB = _env_int("MAX_UPLOAD_MB", 1024)
++JOB_WORKERS = _env_int("JOB_WORKERS", 1)           # files processed at the same time
++
++# --- OCR (scanned PDFs / images of text) ------------------------------------------------
++OCR_ENABLED = _env_bool("OCR_ENABLED", True)
++OCR_LANGS = os.getenv("OCR_LANGS", "eng")          # e.g. eng+hin+san (needs the language data)
++OCR_DPI = _env_int("OCR_DPI", 150)                 # higher = slower, a little more accurate
++OCR_WORKERS = _env_int("OCR_WORKERS", 0) or max(1, (os.cpu_count() or 2) - 1)
++OCR_MIN_CHARS = _env_int("OCR_MIN_CHARS", 25)      # a page with less text than this is OCR'd
++OCR_CLEAN = _env_bool("OCR_CLEAN", True)           # drop scanner noise / unreadable lines
++TESSERACT_CMD = os.getenv("TESSERACT_CMD", "")     # full path to tesseract.exe if not on PATH
++
++# File types the server accepts. Override in .env, e.g. SUPPORTED_TYPES=.pdf,.docx,.md
++_DEFAULT_TYPES = ".pdf,.docx,.md,.txt,.csv,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp"
++SUPPORTED = {t.strip().lower() if t.strip().startswith(".") else "." + t.strip().lower()
++             for t in os.getenv("SUPPORTED_TYPES", _DEFAULT_TYPES).split(",") if t.strip()}
++IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
+ NEAR_DUP_THRESHOLD = 0.85   # 0.6 gave 49 false alarms on data/raw2; see scripts/eval_duplicates.py
+ MIN_WORDS = 30
+ 
+--- a/app/parsing.py
++++ b/app/parsing.py
+@@ -26,19 +26,87 @@
+     flush()
+     return sections
+ 
++def _table_lines(table):
++    """A Word table as sentences, one per row: 'Plan: Team; Price: $40; Users: 10.' The header row
++    names every value, so a question about one row finds it. Merged cells are not repeated."""
++    rows = []
++    for row in table.rows:
++        cells, last = [], None
++        for c in row.cells:
++            t = " ".join(c.text.split())
++            if c._tc is not last:
++                cells.append(t)
++            last = c._tc
++        if any(cells):
++            rows.append(cells)
++    if len(rows) < 2:
++        return ["; ".join(c for c in r if c) + "." for r in rows]
++    head = [h or f"column {i + 1}" for i, h in enumerate(rows[0])]
++    return ["; ".join(f"{h}: {v}" for h, v in zip(head, r) if v) + "." for r in rows[1:]]
++
+ def docx_to_markdown(path) -> str:
++    """Paragraphs AND tables, in the order they appear in the document."""
++    from docx.table import Table
++    from docx.text.paragraph import Paragraph
+     doc = DocxDocument(str(path))
+     lines = []
+-    for p in doc.paragraphs:
+-        style = p.style.name
+-        if style.startswith("Heading "):
+-            lines.append("#" * int(style.split()[-1]) + " " + p.text)
+-        elif style == "Title":
+-            lines.append("# " + p.text)
+-        else:
+-            lines.append(p.text)
++    for child in doc.element.body.iterchildren():
++        tag = child.tag.rsplit("}", 1)[-1]
++        if tag == "p":
++            p = Paragraph(child, doc)
++            style = p.style.name if p.style is not None else ""
++            if style.startswith("Heading ") and style.split()[-1].isdigit():
++                lines.append("#" * int(style.split()[-1]) + " " + p.text)
++            elif style == "Title":
++                lines.append("# " + p.text)
++            else:
++                lines.append(p.text)
++        elif tag == "tbl":
++            lines.append("")
++            for ln in _table_lines(Table(child, doc)):
++                lines += [ln, ""]
+     return "\n".join(lines)
+ 
++def read_text_file(path) -> str:
++    """Plain text in whatever encoding it was saved in."""
++    raw = open(path, "rb").read()
++    for enc in ("utf-8-sig", "utf-16", "cp1252"):
++        try:
++            return raw.decode(enc)
++        except (UnicodeDecodeError, UnicodeError):
++            continue
++    return raw.decode("utf-8", errors="replace")
++
++CSV_ROWS_PER_SECTION = 25
++
++def parse_csv(path) -> list[dict]:
++    """A table as sentences ('Region: North; Q1: 120') in groups of rows, so a question about one
++    row finds it and the header names travel with every value."""
++    import csv, io
++    text = read_text_file(path)
++    try:
++        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
++    except csv.Error:
++        dialect = csv.excel
++    rows = [r for r in csv.reader(io.StringIO(text), dialect) if any(c.strip() for c in r)]
++    if not rows:
++        return []
++    head, body = [h.strip() or f"column {i + 1}" for i, h in enumerate(rows[0])], rows[1:]
++    sections = []
++    for start in range(0, len(body), CSV_ROWS_PER_SECTION):
++        part = body[start:start + CSV_ROWS_PER_SECTION]
++        lines = ["; ".join(f"{h}: {v.strip()}" for h, v in zip(head, r) if v.strip()) + "."
++                 for r in part]
++        sections.append({"heading_path": f"rows {start + 1}-{start + len(part)}", "page": None,
++                         "text": "\n\n".join(lines)})
++    return sections
++
++def parse_image(path) -> list[dict]:
++    """A photo or scan of a page: OCR it. Raises RuntimeError (with the reason) if OCR is unavailable."""
++    from app import ocr
++    text = ocr.ocr_image(path)
++    return [{"heading_path": "page 1", "page": 1, "text": text}] if text.strip() else []
++
+ HEADING_MAX_WORDS = 8
+ MIN_PDF_HEADINGS = 2    # fewer than this and the document is treated as having no headings
+ 
+@@ -56,7 +124,7 @@
+         return True
+     return bool(re.match(r"(?:status|date|author)\s*:", prev, re.I))   # header block above it
+ 
+-def pdf_sections(page_texts):
++def pdf_sections(page_texts, force_pages=False):
+     """page_texts: [text of page 1, page 2, ...] -> sections named after the headings found,
+     each carrying its page. A section that continues onto the next page keeps its heading.
+     Falls back to one 'page N' section per page when the PDF has no usable headings."""
+@@ -71,7 +139,7 @@
+             prev = ln
+         flagged.append(row)
+     sections = []
+-    if n_headings < MIN_PDF_HEADINGS:
++    if force_pages or n_headings < MIN_PDF_HEADINGS:     # OCR text: headings are unreliable
+         for i, lines in enumerate(pages, start=1):
+             if lines:
+                 sections.append({"heading_path": f"page {i}", "page": i, "text": "\n".join(lines)})
+@@ -91,7 +159,34 @@
+         flush()
+     return sections
+ 
+-def parse_pdf(path) -> tuple[list[dict], int]:
++def parse_pdf_ex(path, progress=None):
++    """Reads a PDF of any size. Pages that have a text layer are read directly; pages without one
++    (scans) are OCR'd when OCR is available. Returns (sections, page_count, info) where info is
++    {'ocr_pages': n, 'ocr_error': str|None}.  progress(stage, done, total) reports the work."""
++    from app.config import OCR_MIN_CHARS
+     reader = PdfReader(str(path))       # raises on corrupted files; caller handles it
+-    texts = [(page.extract_text() or "").strip() for page in reader.pages]
+-    return pdf_sections(texts), len(reader.pages)
+\ No newline at end of file
++    n = len(reader.pages)
++    texts, need_ocr = [], []
++    for i, page in enumerate(reader.pages, start=1):
++        t = (page.extract_text() or "").strip()
++        texts.append(t)
++        if len(t) < OCR_MIN_CHARS:
++            need_ocr.append(i)
++        if progress and (i % 25 == 0 or i == n):
++            progress("reading", i, n)
++    info = {"ocr_pages": 0, "ocr_error": None}
++    if need_ocr:
++        from app import ocr
++        try:
++            done = ocr.ocr_pages(path, need_ocr,
++                                 (lambda d, t: progress("ocr", d, t)) if progress else None)
++            for p, txt in done.items():
++                texts[p - 1] = txt
++            info["ocr_pages"] = len(need_ocr)
++        except Exception as e:           # OCR missing or failed: keep what has a text layer
++            info["ocr_error"] = str(e) if isinstance(e, ocr.OCRUnavailable) else f"{type(e).__name__}: {e}"
++    return pdf_sections(texts, force_pages=info["ocr_pages"] > 0), n, info
++
++def parse_pdf(path) -> tuple[list[dict], int]:
++    sections, n, _ = parse_pdf_ex(path)
++    return sections, n
+--- a/app/ingest.py
++++ b/app/ingest.py
+@@ -2,8 +2,10 @@
+ from datetime import datetime, timezone
+ from pathlib import Path
+ from langdetect import detect, DetectorFactory
+-from app.config import SUPPORTED
+-from app.parsing import parse_markdown_text, docx_to_markdown, parse_pdf
++from app.config import SUPPORTED, IMAGE_TYPES
++from app.ocr import OCRUnavailable
++from app.parsing import (parse_markdown_text, docx_to_markdown, parse_pdf_ex, parse_csv,
++                         parse_image, read_text_file)
+ 
+ DetectorFactory.seed = 0
+ NS = uuid.UUID("12345678-1234-5678-1234-567812345678")
+@@ -32,39 +34,59 @@
+ 
+ def detect_lang(text: str) -> str:
+     try:
+-        return detect(text) if len(text.split()) >= 5 else "unknown"
++        return detect(text[:20000]) if len(text.split()) >= 5 else "unknown"
+     except Exception:
+         return "unknown"
+ 
+-def ingest_file(path: Path, workspace_id: str = "default", original_name: str | None = None):
+-    raw = path.read_bytes()
++def _sha256_file(path: Path) -> str:
++    h = hashlib.sha256()
++    with open(path, "rb") as f:                       # 1 MB at a time: any file size is fine
++        for block in iter(lambda: f.read(1 << 20), b""):
++            h.update(block)
++    return h.hexdigest()
++
++def ingest_file(path: Path, workspace_id: str = "default", original_name: str | None = None,
++                progress=None):
++    """progress(stage, done, total) is optional; it is how long scans report OCR progress."""
+     name = original_name or path.name
+     stem, ext = Path(name).stem, Path(name).suffix.lower()
+     m = re.search(r"_v(\d+)$", stem)
+     logical = re.sub(r"_v\d+$", "", stem)
+     label = f"v{m.group(1)}" if m else "v1"
+-    chash = hashlib.sha256(raw).hexdigest()
++    chash = _sha256_file(path)
+ 
+     rec = {
+         "document_id": str(uuid.uuid5(NS, f"{workspace_id}:{logical}")),
+         "version_id": str(uuid.uuid5(NS, f"{workspace_id}:{logical}:{chash}")),
+         "logical_name": logical, "label": label, "filename": name,
+         "source_uri": str(path), "file_type": ext.lstrip("."),
+-        "size_bytes": len(raw), "content_hash": chash,
++        "size_bytes": path.stat().st_size, "content_hash": chash,
+         "ingested_at": datetime.now(timezone.utc).isoformat(),
+         "status": "ok", "error": None, "page_count": None,
+     }
+-    sections, text = [], ""
++    sections, text, ocr_info = [], "", None
+     try:
+-        if ext == ".md":
+-            sections = parse_markdown_text(raw.decode("utf-8", errors="replace"))
++        if ext in (".md", ".txt"):
++            sections = parse_markdown_text(read_text_file(path))
++        elif ext == ".csv":
++            sections = parse_csv(path)
++        elif ext in IMAGE_TYPES:
++            sections = parse_image(path)
++            ocr_info = {"ocr_pages": 1 if sections else 0, "ocr_error": None}
+         elif ext == ".docx":
+             sections = parse_markdown_text(docx_to_markdown(path))
+         elif ext == ".pdf":
+-            sections, rec["page_count"] = parse_pdf(path)
++            sections, rec["page_count"], info = parse_pdf_ex(path, progress)
++            ocr_info = info
+         text = "\n\n".join(s["text"] for s in sections)
+         if not text.strip():
+             rec["status"] = "empty"
++            if ocr_info and ocr_info["ocr_error"]:
++                rec["error"] = "Scanned PDF and OCR is not available: " + ocr_info["ocr_error"]
++            elif ocr_info and ocr_info["ocr_pages"]:
++                rec["error"] = "OCR ran but found no readable text."
++    except OCRUnavailable as e:                     # OCR needed but not available
++        rec["status"], rec["error"] = "empty", f"OCR is not available: {e}"
+     except Exception as e:
+         rec["status"], rec["error"] = "failed", f"{type(e).__name__}: {e}"
+ 
+@@ -74,6 +96,7 @@
+         "author": meta["author"], "text": text,
+         "language": detect_lang(text), "section_count": len(sections),
+     })
++    rec["ocr_pages"] = ocr_info["ocr_pages"] if ocr_info else 0      # not stored in the DB
+     return rec, sections
+ 
+ def ingest_directory(raw_dir: Path, workspace_id: str = "default"):
+--- a/app/indexing.py
++++ b/app/indexing.py
+@@ -3,21 +3,53 @@
+ from app.chunking import build_chunks
+ from app.embeddings import embed_texts
+ 
+-def index_workspace(con, workspace_id, strategies=("structure", "fixed"), embed=True):
++EMBED_CHUNK = 64          # chunks embedded per call, so progress can be reported on big files
++
++
++def _embed_in_batches(texts, progress=None):
++    vectors = []
++    for i in range(0, len(texts), EMBED_CHUNK):
++        vectors += embed_texts(texts[i:i + EMBED_CHUNK])
++        if progress:
++            progress(min(i + EMBED_CHUNK, len(texts)), len(texts))
++    return vectors
++
++
++def _index_one(con, version_id, strategies, embed, stats, progress=None):
++    sections = con.execute(
++        "SELECT heading_path, page, text FROM sections WHERE version_id=%s ORDER BY idx",
++        (version_id,)).fetchall()
++    for strat in strategies:
++        chunks = build_chunks(version_id, sections, strat)
++        vectors = None
++        if embed and chunks:
++            vectors = _embed_in_batches(
++                [f'{c["heading_path"]}\n{c["text"]}' for c in chunks],
++                (lambda d, t: progress(strat, d, t)) if progress else None)
++        db.replace_chunks(con, version_id, strat, chunks, vectors)
++        stats["chunks"][strat] = stats["chunks"].get(strat, 0) + len(chunks)
++
++
++def index_versions(con, version_ids, strategies=("structure", "fixed"), embed=True,
++                   progress=None):
++    """Index only the given versions (used right after an upload, so earlier files are not
++    embedded a second time). progress(strategy, done, total) is optional."""
++    stats = {"versions": len(version_ids), "chunks": {}, "embedded": embed}
++    for vid in version_ids:
++        _index_one(con, vid, strategies, embed, stats, progress)
++    return stats
++
++
++def index_workspace(con, workspace_id, strategies=("structure", "fixed"), embed=True,
++                    only_missing=False):
+     versions = con.execute(
+         "SELECT v.version_id FROM document_versions v "
+         "JOIN documents d ON d.document_id = v.document_id "
+         "WHERE d.workspace_id=%s AND v.status='ok'", (workspace_id,)).fetchall()
+-    stats = {"versions": len(versions), "chunks": {}, "embedded": embed}
+-    for v in versions:
+-        sections = con.execute(
+-            "SELECT heading_path, page, text FROM sections WHERE version_id=%s ORDER BY idx",
+-            (v["version_id"],)).fetchall()
+-        for strat in strategies:
+-            chunks = build_chunks(v["version_id"], sections, strat)
+-            vectors = None
+-            if embed and chunks:
+-                vectors = embed_texts([f'{c["heading_path"]}\n{c["text"]}' for c in chunks])
+-            db.replace_chunks(con, v["version_id"], strat, chunks, vectors)
+-            stats["chunks"][strat] = stats["chunks"].get(strat, 0) + len(chunks)
+-    return stats
+\ No newline at end of file
++    ids = [v["version_id"] for v in versions]
++    if only_missing and ids:
++        have = {r["version_id"] for r in con.execute(
++            "SELECT DISTINCT version_id FROM chunks WHERE version_id = ANY(%s)",
++            (ids,)).fetchall()}
++        ids = [i for i in ids if i not in have]
++    return index_versions(con, ids, strategies, embed)
+--- a/app/answering.py
++++ b/app/answering.py
+@@ -8,7 +8,7 @@
+ DetectorFactory.seed = 0
+ # "book": Hindi / Hinglish questions are answered with the document's own explanation (no model writes the
+ # answer, instant and cannot invent). "model": the local model writes the answer. Set HINDI_ANSWER_MODE in .env.
+-HINDI_ANSWER_MODE = os.getenv("HINDI_ANSWER_MODE", "book").strip().lower()
++HINDI_ANSWER_MODE = (os.getenv("ANSWER_MODE") or os.getenv("HINDI_ANSWER_MODE", "book")).strip().lower()   # "book"/"extract" or "model"
+ LANG_NAMES = {"en": "English", "hi": "Hindi", "mr": "Marathi", "bn": "Bengali", "ta": "Tamil",
+               "te": "Telugu", "gu": "Gujarati", "pa": "Punjabi", "ur": "Urdu", "kn": "Kannada",
+               "ml": "Malayalam", "ne": "Nepali", "fr": "French", "de": "German", "es": "Spanish",
+@@ -40,6 +40,23 @@
+         except Exception:
+             lang = same
+     return f"\n\nWrite the answer in {lang}. Do not answer in Chinese unless the question is in Chinese."
++def _lang_of(question):
++    """Header language for extractive answers: 'devanagari', 'hinglish' or 'en'."""
++    if re.search(r"[\u0900-\u097F]", question):
++        return "devanagari"
++    return "hinglish" if is_hinglish(question) else "en"
++
++def _semantic(query, sentences):
++    """Cosine similarity of each sentence to the question, with the same embedding model that search
++    uses (so synonyms work: 'death' finds 'dies'). Returns None if the model cannot run, and the
++    answer then uses word matching only."""
++    try:
++        from app.embeddings import embed_query, embed_texts
++        q = embed_query(query)
++        return [float(sum(a * b for a, b in zip(q, v))) for v in embed_texts(sentences)]
++    except Exception:
++        return None
++
+ REWRITE_SYSTEM = (
+     "You convert a question written in Hinglish (Hindi in English letters) into two versions. "
+     "Translate every word faithfully: keep every noun and verb, do not summarize, do not replace words, "
+@@ -206,9 +223,10 @@
+         repair = "off_topic"
+     book_mode = hindi and HINDI_ANSWER_MODE != "model"
+     if on_topic and book_mode and enough_evidence(mode, rows, gate):
+-        pick = af.best_passage([q for q in queries if q != question] or [question], evidence)
++        q_list = [q for q in queries if q != question] or [question]
++        pick = af.best_passage(q_list, evidence, semantic=_semantic)
+         if pick:
+-            answer = af.book_answer(pick, devanagari=bool(re.search(r"[\u0900-\u097F]", question)))
++            answer = af.book_answer(pick, lang=_lang_of(question), queries=q_list)
+             valid, invalid, status, repair = [pick["n"]], [], "answered", "book"
+     elif on_topic and enough_evidence(mode, rows, gate):
+         model = LLM_MODEL
+--- a/app/answer_format.py
++++ b/app/answer_format.py
+@@ -10,6 +10,7 @@
+ Pure functions: no database, no model.
+ """
+ import re
++from app import extractive as ex
+ 
+ CITE = re.compile(r"\[\d+(?:\s*,\s*\d+)*\]")
+ PUNCT = re.compile(r"[\[\]()|\u0964\u0965.,;:!?\"'\u201c\u201d\u2018\u2019\-\u2013\u2014]")
+@@ -166,7 +167,9 @@
+ 
+ 
+ def is_hindi_question(question, is_hinglish):
+-    return bool(DEVANAGARI.search(question)) or bool(is_hinglish(question))
++    """True for questions the small local model handles badly: Hinglish, or any script other than
++    Latin (Hindi, Marathi, Tamil, Arabic, Chinese ...). The name is kept for older callers."""
++    return any(c.isalpha() and ord(c) > 0x24F for c in question) or bool(is_hinglish(question))
+ 
+ 
+ def latin_ratio(text):
+@@ -250,39 +253,29 @@
+     return out if len(out) >= 20 else (text or "").strip()
+ 
+ 
+-def best_passage(queries, evidence):
+-    """The passage that mentions the most specific words of the question, or None.
+-    `queries` are the rewritten versions only (English and/or Devanagari). Ties go to the higher-ranked passage."""
+-    eng = pick_english(queries)
+-    specific = question_terms(eng)[0] if eng else set()
+-    toks = []
+-    for q in queries:
+-        if latin_ratio(q) > 0.85:
+-            continue
+-        toks += [t for t in re.findall(r"[\u0900-\u097F]+", q)
+-                 if len(t) >= 3 and t not in HINDI_MARKERS and t not in QWORDS_HI and t not in GENERIC_HI]
+-    best, best_score = None, 0
+-    for e in evidence:
+-        words = _stems(re.findall(r"[a-z]+", e["text"].lower()))
+-        score = 2 * len(words & specific) + 2 * sum(1 for t in toks if t[:max(3, len(t) - 2)] in e["text"])
+-        if score > best_score:
+-            best, best_score = e, score
+-    return best
+-
+-
+-def book_answer(e, devanagari=False):
+-    """A user-friendly answer made only of the document's own explanation of the verse (no model, no Sanskrit)."""
+-    hindi, english = meaning_parts(e["text"])
+-    n = e["n"]
+-    head = "आपके दस्तावेज़ में यह लिखा है:" if devanagari else "Aapke document mein yeh likha hai:"
+-    lines = [head]
+-    if hindi:
+-        lines.append(f"{shorten(hindi, 450)} [{n}]")
+-    if english:
+-        lines.append(f"{shorten(english, 450)} [{n}]")
+-    if not hindi and not english:
+-        lines.append(f"{shorten(meaning_text(e['text']), 450)} [{n}]")
+-    return "\n\n".join(lines)
++def best_passage(queries, evidence, semantic=None):
++    """The passage that best answers the question, or None. Works on any text: words are matched by
++    prefix and weighted by how rare they are in the retrieved passages; `semantic(query, sentences)`
++    (optional) adds meaning-based matching. The sentences chosen are attached as `_selected`."""
++    res = ex.extract(queries, evidence, semantic, markers=HINDI_MARKERS)
++    if not res:
++        return None
++    e = next(x for x in evidence if x["n"] == res["n"])
++    return dict(e, _selected=res["sentences"])
++
++
++def book_answer(e, devanagari=False, queries=None, lang=None, semantic=None):
++    """A readable answer made only of the document's own sentences, with the citation. `lang` is
++    'devanagari', 'hinglish' or 'en' and only chooses the one-line header."""
++    lang = lang or ("devanagari" if devanagari else "hinglish")
++    sents = e.get("_selected")
++    if not sents:
++        res = ex.extract(queries, [e], semantic, markers=HINDI_MARKERS) if queries else None
++        sents = res["sentences"] if res else \
++            ex.drop_verse_lines(ex.sentences(e["text"]), HINDI_MARKERS)[:3]
++    if not sents:
++        sents = [shorten(re.sub(r"\s+", " ", e["text"]).strip(), 450)]
++    return ex.render(e["n"], sents, ex.HEADERS.get(lang, ex.HEADERS["en"]))
+ 
+ 
+ def strip_question_echo(text, *questions):
+--- a/app/static/chat.html
++++ b/app/static/chat.html
+@@ -324,37 +324,57 @@
+   catch(e){errMsg('Could not create a workspace. Is the server running?')}
+ };
+ 
++async function waitJob(id,user,onMsg){
++  let fails=0;
++  for(;;){
++    await new Promise(r=>setTimeout(r,1500));
++    try{
++      const x=await api('/api/v1/jobs/'+encodeURIComponent(id),{headers:{'X-User-Id':user}});
++      if(x.status===404)return{state:'failed',error:'The server was restarted while this file was being processed. Please upload it again.'};
++      const j=await x.json();fails=0;
++      onMsg(j.message||j.stage||'Working');
++      if(j.state==='done'||j.state==='failed')return j;
++    }catch(e){if(++fails>20)return{state:'failed',error:'Lost the connection to the server.'}}
++  }
++}
++
+ $('file').onchange=async()=>{
+   const files=Array.from($('file').files);
+   $('file').value='';
+   if(!files.length)return;
+   const user=$('user').value.trim();
+   const note=info('Uploading '+files.length+' file(s)...');
++  const setNote=t=>{note.querySelector('.b').textContent=t};
+   let ws=$('ws').value.trim();
+   try{if(!ws)ws=await createWorkspace()}catch(e){note.remove();errMsg('Could not create a workspace for your files. Is the server running?');return}
++  let lim={};
++  try{const lx=await api('/api/v1/limits');if(lx.ok)lim=await lx.json()}catch(e){}      // limits come from the server, not from this page
+   let ok=0;
+-  for(const f of files){
++  for(let n=0;n<files.length;n++){
++    const f=files[n],tag=files.length>1?' ('+(n+1)+'/'+files.length+')':'',mb=f.size/1048576;
+     try{
++      if(lim.max_upload_mb>0&&mb>lim.max_upload_mb){errMsg(f.name+' is '+mb.toFixed(0)+' MB. This server accepts up to '+lim.max_upload_mb+' MB (MAX_UPLOAD_MB in the .env file; 0 means no limit).');continue}
++      setNote('Uploading '+f.name+tag+' ('+mb.toFixed(1)+' MB)...');
+       const fd=new FormData();fd.append('file',f);
+-      const x=await api('/api/v1/documents/upload?workspace_id='+encodeURIComponent(ws),{method:'POST',headers:{'X-User-Id':user},body:fd});
++      const x=await api('/api/v1/documents/upload?background=true&workspace_id='+encodeURIComponent(ws),{method:'POST',headers:{'X-User-Id':user},body:fd});
+       const j=await x.json().catch(()=>({}));
+-      if(x.ok&&j.status==='ok'){ok++}
+-      else if(x.ok){errMsg(f.name+' was saved but no text could be read from it ('+(j.status||'unknown')+'). Scanned PDFs without text cannot be used.')}
+-      else if(x.status===415){errMsg(f.name+': only .md, .pdf and .docx files are supported.')}
+-      else if(x.status===413){errMsg(f.name+' is larger than 20 MB.')}
++      if(x.status===202){
++        const r=await waitJob(j.job_id,user,m=>setNote(f.name+tag+': '+m));
++        if(r.state==='done'&&r.result&&r.result.status==='ok'){ok++}
++        else if(r.state==='done'){errMsg(f.name+': '+(r.error||r.message||'no text could be read from it.'))}
++        else{errMsg(f.name+': '+(r.error||'processing failed. Check the server window for details.'))}
++      }
++      else if(x.status===415){errMsg(f.name+': this file type is not supported. Supported: '+((lim.supported||[]).join(', ')||'see the server')+'.')}
++      else if(x.status===413){errMsg(f.name+': '+(j.detail||'file is too large')+'. Raise MAX_UPLOAD_MB in the .env file (0 = no limit) and restart the server.')}
+       else if(x.status===404){errMsg('Workspace not found for this user. Check the user and workspace in settings.')}
+       else{errMsg(f.name+': upload failed ('+x.status+').')}
+     }catch(e){errMsg(f.name+': could not reach the server.')}
+   }
+   if(!ok){note.remove();return}
+-  note.querySelector('.b').textContent='Reading your files and building the search index. This can take a minute...';
+-  try{
+-    const x=await api('/api/v1/workspaces/'+encodeURIComponent(ws)+'/index',{method:'POST',headers:{'X-User-Id':user}});
+-    if(!x.ok)throw new Error(x.status);
+-    note.querySelector('.b').textContent=ok+' file(s) added and indexed. You can ask questions about them now.';
+-  }catch(e){note.remove();errMsg('Files were uploaded but indexing failed. Check the server window for the error.')}
++  setNote(ok+' file(s) added and indexed. You can ask questions about them now.');
+ };
+ 
++(async()=>{try{const x=await api('/api/v1/limits');if(x.ok){const j=await x.json();if(j.supported&&j.supported.length)$('file').accept=j.supported.join(',')}}catch(e){}})();      // accepted types come from the server
+ (async()=>{try{const x=await api('/api/v1/model');if(x.ok){const j=await x.json();$('modelinfo').textContent='Model: '+j.chat_model+' ('+j.provider+')'}}catch(e){}})();
+ showEmpty();
+ </script>
+--- /dev/null
++++ b/app/ocr.py
+@@ -0,0 +1,175 @@
++# app/ocr.py
++"""OCR for scanned PDFs. Everything here is optional: if the OCR packages or the Tesseract
++program are missing, ocr_status() says why and the caller reports it instead of crashing."""
++import os, re, shutil
++from concurrent.futures import ThreadPoolExecutor
++from functools import lru_cache
++
++from app.config import (OCR_ENABLED, OCR_LANGS, OCR_DPI, OCR_WORKERS, TESSERACT_CMD,
++                        OCR_CLEAN)
++
++class OCRUnavailable(RuntimeError):
++    """OCR was needed but cannot run (package or Tesseract missing). The message says what to install."""
++
++
++_WIN_DEFAULTS = (r"C:\Program Files\Tesseract-OCR\tesseract.exe",
++                 r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe")
++
++
++def _find_tesseract():
++    for cand in (TESSERACT_CMD, shutil.which("tesseract"), *_WIN_DEFAULTS):
++        if cand and os.path.exists(cand):
++            return cand
++        if cand and shutil.which(cand):
++            return shutil.which(cand)
++    return None
++
++
++@lru_cache(maxsize=1)
++def ocr_status():
++    """Returns {'available': bool, 'reason': str, 'langs': 'eng+hin', 'missing': [...]}."""
++    if not OCR_ENABLED:
++        return {"available": False, "reason": "OCR is switched off (OCR_ENABLED=0).",
++                "langs": "", "missing": []}
++    try:
++        import pypdfium2                                  # noqa: F401
++        import pytesseract
++        from PIL import Image                              # noqa: F401
++    except ImportError as e:
++        return {"available": False, "langs": "", "missing": [],
++                "reason": f"Missing Python package ({e.name}). "
++                          "Run: pip install pytesseract pypdfium2 pillow"}
++    exe = _find_tesseract()
++    if not exe:
++        return {"available": False, "langs": "", "missing": [],
++                "reason": "The Tesseract program was not found. Install it, or set "
++                          "TESSERACT_CMD in .env to the full path of tesseract.exe."}
++    pytesseract.pytesseract.tesseract_cmd = exe
++    try:
++        installed = set(pytesseract.get_languages(config=""))
++    except Exception as e:
++        return {"available": False, "langs": "", "missing": [],
++                "reason": f"Tesseract could not be started: {e}"}
++    wanted = [l for l in re.split(r"[+,\s]+", OCR_LANGS) if l]
++    use = [l for l in wanted if l in installed] or (["eng"] if "eng" in installed else [])
++    missing = [l for l in wanted if l not in installed]
++    if not use:
++        return {"available": False, "langs": "", "missing": missing,
++                "reason": "No Tesseract language data found. Install at least 'eng'."}
++    return {"available": True, "reason": "", "langs": "+".join(use), "missing": missing}
++
++
++# --- cleanup --------------------------------------------------------------------------
++_NOISE = re.compile(r"[|©®¦\\~_^`§¶•■□▪●]+")
++_STOP = frozenset("""the of and to in is are was were be been it its this that these those with for on
++by as at from or not but he she they we you i his her their our your my me him them who whom which
++what when where why how all any each if then than there here so no yes do does did have has had
++will would shall should can could may might must o said""".split())
++_NON_LATIN = {"hin", "san", "ara", "ben", "tam", "tel", "guj", "kan", "mal", "mar", "pan",
++              "urd", "rus", "chi_sim", "chi_tra", "jpn", "kor", "tha", "heb", "ell"}
++
++
++_SHORT_OK = frozenset("a i o of to in is it he we me be by or on at as an if no so do up us my".split())
++
++
++def _trim_edges(ln):
++    """Page borders and decorations leave stray 1-2 letter tokens at line ends ('...wielding f')."""
++    ln = re.sub(r"^[)}\]>@*¥»]+\s*", "", ln)
++    ln = re.sub(r"\s*[({\[<@*¥«]+$", "", ln)
++    toks = ln.split()
++    while len(toks) > 3 and len(re.sub(r"\W", "", toks[-1])) <= 2 \
++            and toks[-1][-1:].isalnum() and toks[-1].lower() not in _SHORT_OK:
++        toks.pop()
++    while len(toks) > 3 and len(re.sub(r"\W", "", toks[0])) <= 2 \
++            and toks[0][-1:].isalnum() and toks[0].lower() not in _SHORT_OK:
++        toks.pop(0)
++    return " ".join(toks)
++
++
++def _english_only(langs):
++    return not (set(re.split(r"[+,\s]+", langs)) & _NON_LATIN)
++
++
++def clean_ocr_text(text, langs="eng"):
++    """Removes scanner noise. When only English is being read, also drops the lines that are
++    really Sanskrit/Hindi text mis-read as Latin letters (they contain no English words and
++    would pollute the search index)."""
++    if not OCR_CLEAN:
++        return text.strip()
++    english = _english_only(langs)
++    keep = []
++    for raw in text.splitlines():
++        ln = _NOISE.sub(" ", raw)
++        ln = re.sub(r"\s{2,}", " ", ln).strip(" \t-—–.,;:'\"")
++        if len(re.sub(r"[^A-Za-z0-9]", "", ln)) < 3:
++            continue
++        letters = sum(c.isalpha() for c in ln)
++        if letters / max(1, len(ln.replace(" ", ""))) < 0.6:
++            continue
++        toks = re.findall(r"[A-Za-z']+", ln)
++        if english and len(toks) >= 4:
++            hits = sum(t.lower() in _STOP for t in toks)
++            if hits == 0 or hits / len(toks) < 0.12:
++                continue
++            short = sum(len(t) <= 2 for t in toks) / len(toks)
++            if short > 0.5 and hits / len(toks) < 0.4:      # "aA el uals ca eal iN"
++                continue
++        keep.append(_trim_edges(ln))      # trim only after the line has been judged
++    return "\n".join(keep)
++
++
++# --- OCR ------------------------------------------------------------------------------
++def ocr_pages(pdf_path, page_numbers, progress=None):
++    """OCR the given 1-based pages. Returns {page_number: text}. Pages are rendered one by one
++    (so memory stays flat for a 1000-page scan) and read by several Tesseract processes at once.
++    progress(done, total) is called after each page."""
++    st = ocr_status()
++    if not st["available"]:
++        raise OCRUnavailable(st["reason"])
++    import pypdfium2 as pdfium
++    import pytesseract
++    langs, total, out = st["langs"], len(page_numbers), {}
++    workers = max(1, OCR_WORKERS)
++    scale = OCR_DPI / 72.0
++    pdf = pdfium.PdfDocument(str(pdf_path))
++    try:
++        def read(img):
++            try:
++                return pytesseract.image_to_string(img, lang=langs, config="--psm 6")
++            finally:
++                img.close()
++
++        done = 0
++        with ThreadPoolExecutor(max_workers=workers) as pool:
++            for start in range(0, total, workers * 2):               # small batches = bounded RAM
++                batch = page_numbers[start:start + workers * 2]
++                futures = []
++                for p in batch:
++                    page = pdf[p - 1]
++                    img = page.render(scale=scale, grayscale=True).to_pil()
++                    page.close()
++                    futures.append((p, pool.submit(read, img)))
++                for p, fut in futures:
++                    out[p] = clean_ocr_text(fut.result(), langs)
++                    done += 1
++                    if progress:
++                        progress(done, total)
++    finally:
++        pdf.close()
++    return out
++
++
++def ocr_image(path):
++    """OCR one image file (photo or scan of a page). Returns cleaned text."""
++    st = ocr_status()
++    if not st["available"]:
++        raise OCRUnavailable(st["reason"])
++    import pytesseract
++    from PIL import Image, ImageOps
++    with Image.open(path) as im:
++        im = ImageOps.exif_transpose(im).convert("L")
++        if max(im.size) < 1500:                      # small photos read better when enlarged
++            f = 1500 / max(im.size)
++            im = im.resize((int(im.width * f), int(im.height * f)))
++        return clean_ocr_text(pytesseract.image_to_string(im, lang=st["langs"], config="--psm 6"),
++                              st["langs"])
+--- /dev/null
++++ b/app/jobs.py
+@@ -0,0 +1,56 @@
++# app/jobs.py
++"""Runs long uploads (big PDFs, OCR, embedding) in the background so the web request returns at
++once and the browser can show progress. State lives in memory: if the server is restarted while
++a file is being processed, that file must be uploaded again (the saved copy on disk is kept)."""
++import threading, time, uuid
++from concurrent.futures import ThreadPoolExecutor
++
++from app.config import JOB_WORKERS
++
++_LOCK = threading.Lock()
++_JOBS: dict[str, dict] = {}
++_POOL = ThreadPoolExecutor(max_workers=max(1, JOB_WORKERS), thread_name_prefix="nexus-job")
++_KEEP_SECONDS = 24 * 3600
++
++
++def _purge():
++    cutoff = time.time() - _KEEP_SECONDS
++    for jid in [j for j, v in _JOBS.items() if v["updated"] < cutoff]:
++        _JOBS.pop(jid, None)
++
++
++def create(owner, workspace_id, filename):
++    jid = str(uuid.uuid4())
++    with _LOCK:
++        _purge()
++        _JOBS[jid] = {"job_id": jid, "owner": owner, "workspace_id": workspace_id,
++                      "filename": filename, "state": "queued", "stage": "waiting",
++                      "done": 0, "total": 0, "message": "Waiting to start", "result": None,
++                      "error": None, "created": time.time(), "updated": time.time()}
++    return jid
++
++
++def update(jid, **fields):
++    with _LOCK:
++        if jid in _JOBS:
++            _JOBS[jid].update(fields, updated=time.time())
++
++
++def get(jid, owner):
++    with _LOCK:
++        job = _JOBS.get(jid)
++        if not job or job["owner"] != owner:
++            return None
++        return dict(job)
++
++
++def submit(jid, fn, *args):
++    """Run fn(*args) in the background; any exception becomes the job's error."""
++    def run():
++        update(jid, state="running", message="Starting")
++        try:
++            fn(*args)
++        except Exception as e:                         # never let a thread die silently
++            update(jid, state="failed", stage="failed", error=f"{type(e).__name__}: {e}",
++                   message="Processing failed")
++    _POOL.submit(run)
+--- /dev/null
++++ b/app/extractive.py
+@@ -0,0 +1,225 @@
++# app/extractive.py
++"""Generic extractive answering: pick the sentences of a retrieved passage that answer the
++question and show them cleanly, with the citation. Nothing here is specific to one book, one
++language or one layout:
++
++  * words are matched by prefix (so 'weapons' finds 'weapon', and Indic word endings work),
++  * word importance is measured on the retrieved text itself (inverse document frequency), so
++    words that appear everywhere are ignored automatically,
++  * an optional `semantic(query, sentences)` function (the embedding model) adds meaning-based
++    matching, which handles synonyms in any language the model understands,
++  * scan noise (stray symbols, broken lines, hyphenated line ends) is cleaned generically.
++
++Pure functions: no database and no language model. `semantic` is passed in by the caller.
++"""
++import math, re, unicodedata
++
++_SEP = r"\s\-\u2013\u2014,;:!?()\[\]{}\"'\u201c\u201d\u2018\u2019|\u0964\u0965./\\<>=+*#@~_`"
++_TOKEN = re.compile(r"[^" + _SEP + r"]+")
++_JUNK = re.compile(r"[\u00a9\u00ae\u00a6~_^\u00a7\u00b6\u2022\u25a0\u25a1\u25aa\u25cf=<>]+")
++_SENT_END = re.compile(r"(?<=[.!?\u0964\u0965\u3002\u061f\uff01\uff1f])\s+|\s*\|\s*")
++_NUM_TAIL = re.compile(r"\s*\(\d{1,3}(?:\s*[&,\-\u2013]\s*\d{1,3})*\)\s*$")
++_NUM_END = re.compile(r"(?<=\))\s+(?=[^\W\d_])")            # "... dry it. (23) For this soul" -> split
++_LEAD_NOISE = re.compile(r"^[\d\u0966-\u096F\sIVXl|()\-]+(?=[^\W\d_])")
++_SHORT_OK = frozenset("a i o of to in is it he we me be by or on at as an if no so do up us my".split())
++
++STOP = frozenset("""a an the is are was were be been being do does did can could would will shall should may
++might must why what who whom whose how when where which that this these those it its they them their he
++she his her we you your i me my to of in on at by for from with as and or not no nor so than then there
++here into out up about over under again further once only own same too very s t just don now also any
++each other some such if but because while during after before between through""".split())
++
++
++# --- text helpers ---------------------------------------------------------------------
++def script_of(text):
++    """'latin', 'devanagari' or 'other': the dominant script of the letters in text."""
++    lat = dev = oth = 0
++    for c in text or "":
++        if not c.isalpha():
++            continue
++        o = ord(c)
++        if o <= 0x24F or 0x1E00 <= o <= 0x1EFF:
++            lat += 1
++        elif 0x0900 <= o <= 0x097F:
++            dev += 1
++        else:
++            oth += 1
++    if not (lat or dev or oth):
++        return "latin"
++    return max((("latin", lat), ("devanagari", dev), ("other", oth)), key=lambda x: x[1])[0]
++
++
++def tokens(text):
++    return [t.lower() for t in _TOKEN.findall(text or "")]
++
++
++def stem(tok):
++    n = len(tok)
++    return tok if n <= 4 else tok[:max(4, math.ceil(n * 0.8))]
++
++
++def query_stems(queries):
++    out = set()
++    for q in queries or []:
++        for t in tokens(q):
++            if len(t) > 2 and t not in STOP and not t.isdigit():
++                out.add(stem(t))
++    return out
++
++
++def clean_text(text):
++    """Generic scan clean-up that keeps paragraph breaks."""
++    t = _JUNK.sub(" ", text or "")
++    t = re.sub(r"(?<=\w)-\n(?=\w)", "", t)                       # hyphenated line end
++    paras = []
++    for para in re.split(r"\n\s*\n", t):
++        lines = [ln.strip() for ln in para.splitlines() if sum(c.isalnum() for c in ln) >= 2]
++        if lines:
++            paras.append(" ".join(lines))
++    return "\n\n".join(paras)
++
++
++def _denoise(s):
++    """Scans often put one or two stray characters of another script inside a sentence ('... wind dry
++    एव च For this soul ...'). In a Latin sentence of reasonable length, such short foreign runs are removed."""
++    toks = s.split()
++    if len(toks) < 6 or script_of(s) != "latin":
++        return s
++    keep, run = [], []
++    def flush():
++        if len(run) > 2:
++            keep.extend(run)                        # a longer foreign run is real text: keep it
++        run.clear()
++    for t in toks:
++        if any(ord(c) > 0x24F and (c.isalnum() or unicodedata.category(c).startswith('M')) for c in t):
++            run.append(t)
++        else:
++            flush(); keep.append(t)
++    flush()
++    return " ".join(keep)
++
++
++def sentences(text):
++    """Split into sentences in any common script; tiny fragments are joined to the next sentence."""
++    out = []
++    for para in clean_text(text).split("\n\n"):
++        para = _NUM_END.sub("\n", para)
++        for part in re.split(r"\n+", para):
++            for s in _SENT_END.split(part):
++                s = _LEAD_NOISE.sub("", s.strip()).strip()
++                s = re.sub(r"(?<=[A-Za-z])\d(?=[a-z]{3,})", "", s)        # "2verlasting"
++                s = _denoise(s)
++                s = re.sub(r"[\u0964\u0965][\s\u0964\u0965|]*$", "\u0964", s)  # "।।" -> "।"
++                if sum(c.isalpha() for c in s) >= 2:
++                    out.append(s)
++    merged, carry = [], ""
++    for s in out:
++        s = (carry + " " + s).strip() if carry else s
++        carry = ""
++        if len(tokens(s)) < 3:
++            carry = s                                         # too short on its own: prepend to the next
++            continue
++        merged.append(s)
++    if carry and merged:
++        merged[-1] += " " + carry
++    return merged
++
++
++def drop_verse_lines(sents, markers):
++    """Mixed passages that hold an unexplained verse line next to its explanation (Sanskrit next to
++    Hindi, Latin next to English, ...): when some sentences in a script contain ordinary function
++    words (`markers`) and others do not, the others are verse lines and are dropped. Nothing is
++    dropped when all of them look alike, so a document in any other language is left untouched."""
++    if not markers:
++        return sents
++    dev = [s for s in sents if script_of(s) == "devanagari"]
++    has = [s for s in dev if any(t in markers for t in tokens(s))]
++    if has and len(has) < len(dev):
++        return [s for s in sents if s not in dev or s in has]
++    return sents
++
++
++# --- scoring --------------------------------------------------------------------------
++def _matches(toks, qstem):
++    return any(t.startswith(qstem) for t in toks)
++
++
++def score_sentences(queries, sents, semantic=None):
++    """Returns (scores, lex, sem): `scores` in [0, 1] per sentence = weighted query-word coverage,
++    blended with meaning-based similarity when `semantic` is given; `lex` and `sem` are the parts."""
++    qs = query_stems(queries)
++    toks = [tokens(s) for s in sents]
++    n = max(1, len(sents))
++    weights = {}
++    for q in qs:
++        df = sum(_matches(t, q) for t in toks)
++        if df:
++            w = math.log(1 + n / df)
++            weights[q] = w * (0.3 if df / n > 0.5 and n >= 4 else 1.0)     # appears everywhere: weak signal
++    total = sum(weights.values())
++    lex = [(sum(w for q, w in weights.items() if _matches(t, q)) / total) if total else 0.0 for t in toks]
++    sem = None
++    if semantic and sents:
++        try:
++            raw = semantic(queries[0] if queries else "", sents)
++        except Exception:
++            raw = None
++        if raw and len(raw) == len(sents):
++            sem = raw
++    if sem is None:
++        return lex, lex, None
++    lo, hi = min(sem), max(sem)
++    norm = [(x - lo) / (hi - lo) if hi > lo else 0.0 for x in sem]
++    return [0.65 * a + 0.35 * b for a, b in zip(lex, norm)], lex, sem
++
++
++def extract(queries, evidence, semantic=None, max_sent=2, markers=None, min_sem=0.55):
++    """Best passage and its best sentences: {'n', 'sentences', 'score'} or None when no passage is
++    about the question. `evidence` = [{'n': 1, 'text': ...}, ...] in rank order."""
++    best = None
++    for rank, e in enumerate(evidence):
++        sents = drop_verse_lines(sentences(e["text"]), markers)
++        if not sents:
++            continue
++        scores, lex, sem = score_sentences(queries, sents, semantic)
++        top = max(scores)
++        if not (any(x > 0 for x in lex) or (sem and max(sem) >= min_sem)):
++            continue                                   # no shared word and not close in meaning
++        if top <= 0:
++            continue
++        key = (round(top, 6), -rank)
++        if best is None or key > best[0]:
++            best = (key, e, sents, scores)
++    if best is None:
++        return None
++    _, e, sents, scores = best
++    order = sorted(range(len(sents)), key=lambda k: (-scores[k], k))
++    cut = max(scores) * 0.5
++    chosen = [k for k in order if scores[k] >= cut and scores[k] > 0][:max_sent]
++    first = chosen[0]
++    if (len(tokens(sents[first])) < 6 or sents[first].rstrip()[-1:] in ",;:") and first + 1 < len(sents) \
++            and first + 1 not in chosen:
++        chosen.append(first + 1)                                    # short or cut-off: add the next sentence
++    chosen = sorted(chosen)
++    return {"n": e["n"], "sentences": [_NUM_TAIL.sub("", sents[k]).strip() for k in chosen],
++            "score": round(max(scores), 4)}
++
++
++# --- display --------------------------------------------------------------------------
++HEADERS = {"devanagari": "\u0906\u092a\u0915\u0947 \u0926\u0938\u094d\u0924\u093e\u0935\u0947\u091c\u093c \u092e\u0947\u0902 \u092f\u0939 \u0932\u093f\u0916\u093e \u0939\u0948:",
++           "hinglish": "Aapke document mein yeh likha hai:",
++           "en": "From your document:"}
++
++
++def render(n, sents, header):
++    """Header, then the sentences grouped by script (a bilingual passage shows each language on its own
++    line), each line ending with the citation."""
++    groups, cur, cur_script = [], [], None
++    for s in sents:
++        sc = script_of(s)
++        if cur and sc != cur_script:
++            groups.append(" ".join(cur)); cur = []
++        cur.append(s); cur_script = sc
++    if cur:
++        groups.append(" ".join(cur))
++    return "\n\n".join([header] + [f"{g} [{n}]" for g in groups])

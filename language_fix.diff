@@ -1,0 +1,164 @@
+diff -ru -x __pycache__ /tmp/lau/app/answering.py lau_fixed/app/answering.py
+--- /tmp/lau/app/answering.py	2026-10-21 14:14:04.000000000 +0000
++++ lau_fixed/app/answering.py	2026-10-21 09:29:47.511779461 +0000
+@@ -166,44 +166,99 @@
+ 
+ 
+ def target_language(question, answer_lang=None):
+-    """(label for the model, kind) of the language the answer must be written in."""
++    """(label for the model, kind, code) of the language the answer must be written in.
++    kind: 'en', 'devanagari', 'hinglish' or 'other'. code: language code when known, else None."""
+     if answer_lang and answer_lang.lower() not in ("", "auto"):
+         a = answer_lang.lower()
+         if a in ("hinglish", "roman hindi"):
+-            return "Hinglish (Hindi written in English letters)", "hinglish"
+-        return answer_lang, ("devanagari" if a == "hindi" else "other")
++            return "Hinglish (Hindi written in English letters)", "hinglish", None
++        code = next((c for c, name in LANG_NAMES.items() if name.lower() == a), None)
++        return answer_lang, ("devanagari" if a == "hindi" else "other"), code
+     if re.search(r"[\u0900-\u097F]", question):
+-        return "Hindi in Devanagari script", "devanagari"
++        return "Hindi in Devanagari script", "devanagari", "hi"
+     if is_hinglish(question):
+-        return "Hinglish (Hindi written in English letters)", "hinglish"
++        return "Hinglish (Hindi written in English letters)", "hinglish", None
+     code, prob = ai.detect_language(question)
+     if not code or prob < 0.9:
+         code = "en"                      # short or unsure: keep English, never guess another language
+-    return LANG_NAMES.get(code, "English"), ("en" if code == "en" else "other")
++    kind = "en" if code == "en" else "other"
++    return LANG_NAMES.get(code, code), kind, code
+ 
+ 
+ TRANSLATE_SYSTEM = ("You translate an answer. Keep every citation marker like [1] or [2] exactly where it is. "
+                     "Do not add, remove or change facts. Use simple, natural wording. Output only the translation.")
+ 
+ 
+-def in_target_language(text, kind):
+-    """True when the answer already uses the language of the question (Devanagari or Roman Hindi)."""
++def in_target_language(text, kind, code=None):
++    """True when the answer already uses the language of the question. Short or undecidable text counts
++    as correct, so a good answer is never sent for translation by mistake."""
++    if kind == "en":
++        return True
+     if kind == "devanagari":
+         return bool(re.search(r"[\u0900-\u097F]", text))
+-    return is_hinglish(text)
+-
+-
+-def translate_answer(text, target, generate):
+-    """Answer written in English -> target language, citations kept. None if the result is not usable."""
++    if kind == "hinglish":
++        return is_hinglish(text)
++    if not code or len(text.split()) < 6:
++        return True
++    try:
++        return detect(text) == code
++    except Exception:
++        return True
++
++
++CITE_MARK = re.compile(r"\[\d+\]")
++
++
++def _split_sentences(text):
++    return [s for s in re.split(r"(?<=[.!?\u0964])\s+", text.strip()) if s.strip()]
++
++
++def _add_markers(sentence, markers):
++    """Adds the citation markers that are missing from the sentence, just before its final punctuation."""
++    missing = [m for m in dict.fromkeys(markers) if m not in sentence]
++    if not missing:
++        return sentence
++    end = re.search(r"([.!?\u0964]+)\s*$", sentence)
++    stop = end.group(1) if end else ""
++    body = sentence[:end.start()] if end else sentence
++    return f"{body.rstrip()} {' '.join(missing)}{stop}"
++
++
++def restore_citations(source, out):
++    """A translation may drop [1] markers. Put them back, sentence by sentence when the sentence count
++    still matches, so the translated answer keeps the same sources as the original."""
++    if all(m in out for m in CITE_MARK.findall(source)):
++        return out
++    src_s, out_s = _split_sentences(source), _split_sentences(out)
++    if src_s and len(src_s) == len(out_s):
++        return " ".join(_add_markers(o, CITE_MARK.findall(s)) for s, o in zip(src_s, out_s))
++    return _add_markers(out, CITE_MARK.findall(source))
++
++
++def translate_answer(text, target, generate, strict=False):
++    """Answer written in English -> target language, citations kept. None if the model gave nothing usable."""
++    system = TRANSLATE_SYSTEM
++    if strict:
++        system += (" Write every sentence only in the target language. Keep names of people and places "
++                   "as they are.")
+     try:
+-        out = generate(TRANSLATE_SYSTEM, f"Translate into {target}:\n\n{text}", max_tokens=500)
++        out = generate(system, f"Translate into {target}:\n\n{text}", max_tokens=500)
+     except llm.LLMUnavailable:
+         return None
+     out = (out or "").strip()
+-    cites = lambda t: set(re.findall(r"\[\d+\]", t))
+-    if len(out) < 8 or cites(text) - cites(out) or "INSUFFICIENT" in out:
++    if len(out) < 8 or "INSUFFICIENT" in out:
+         return None
+-    return out
++    return restore_citations(text, out)
++
++
++def match_language(answer, target, kind, code, generate):
++    """Make the answer be in the question's language. Tries twice, checks each result.
++    Returns (text, how): how is 'translated' or 'english_only' (the English text is kept if both fail)."""
++    for strict in (False, True):
++        tr = translate_answer(answer, target, generate, strict=strict)
++        if tr and in_target_language(tr, kind, code):
++            return tr, "translated"
++    return answer, "english_only"
+ 
+ 
+ def abstain_message(question, evidence):
+@@ -305,7 +360,7 @@
+         prompt = build_prompt(question, shown)          # the model sees the meaning, not the Sanskrit verse
+         if english_q:
+             prompt += f"\n(English meaning of the question: {english_q})"
+-        tgt, kind = target_language(question, answer_lang)
++        tgt, kind, code = target_language(question, answer_lang)
+         pivot = ANSWER_PIVOT and kind != "en" and (hindi or bool(answer_lang))
+         if pivot:                                      # answer in English first, translate afterwards
+             prompt = build_prompt(english_q or question, shown) + "\n\nWrite the answer in English."
+@@ -332,17 +387,12 @@
+                     raw, valid, invalid, repair = f"{ex['meaning'] or ex['text']} [{ex['n']}]", [ex["n"]], [], "extracted"
+                 else:
+                     gave_up = True                                    # nothing in the passages matches the question
+-            if pivot and valid and not hindi_poor_en(raw):
+-                tr = translate_answer(raw, tgt, llm.generate)
+-                trace_extra["pivot"] = "translated" if tr else "english_only"
+-                if tr:
+-                    raw = tr
+-            if valid and not pivot and kind in ("hinglish", "devanagari") and not in_target_language(raw, kind):
+-                # the model answered in English although the question was Hinglish or Hindi: translate it
+-                tr = translate_answer(raw, tgt, llm.generate)
+-                trace_extra["language_fix"] = "translated" if tr else "not_translated"
+-                if tr:
+-                    raw = tr
++            # The answer must be in the question's language, for any language. Pivot mode writes in English
++            # first; otherwise the model was asked for the target language. Either way, check and fix.
++            if valid and kind != "en" and not in_target_language(raw, kind, code):
++                if not (pivot and hindi_poor_en(raw)):          # too short to translate reliably: keep it
++                    raw, how = match_language(raw, tgt, kind, code, llm.generate)
++                    trace_extra["pivot" if pivot else "language_fix"] = how
+             answer = raw
+             body = af.body(raw)
+             if not gave_up and CHECK_QUOTES:                     # remove quotations the passages do not contain
+@@ -379,7 +429,8 @@
+                 status = "answered" if (valid and (len(body.split()) >= 3 or len(body) >= 12)) else "uncited"
+     tv0 = time.perf_counter()
+     verification = None
+-    if status == "answered" and (hindi or trace_extra.get("pivot") == "translated"):
++    translated = "translated" in (trace_extra.get("pivot"), trace_extra.get("language_fix"))
++    if status == "answered" and (hindi or translated):
+         verification = {"skipped": "The claim check is English-only and not reliable for Hindi text."}
+     elif status == "answered" and CHECK_CLAIMS:
+         try:
+Only in lau_fixed/tests: test_language_match.py

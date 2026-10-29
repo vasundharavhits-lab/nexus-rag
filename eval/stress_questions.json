@@ -1,0 +1,31 @@
+{
+  "answerable": [
+    {"q": "ERR-4471",
+     "relevant": [{"files": ["incident_log.md"], "contains": "waits longer than 30 seconds"}]},
+    {"q": "What causes ERR-5023?",
+     "relevant": [{"files": ["incident_log.md"], "contains": "nightly reindex job"}]},
+    {"q": "How do I fix error ERR-6180 after changing models?",
+     "relevant": [{"files": ["incident_log.md"], "contains": "different model"}]},
+    {"q": "PARSER_TIMEOUT_S",
+     "relevant": [{"files": ["incident_log.md"], "contains": "PARSER_TIMEOUT_S"}]},
+    {"q": "Why was DR-002 decided?",
+     "relevant": [{"files": ["decisions.md", "decisions_copy.md"], "contains": "chose pgvector"}]},
+    {"q": "Why vector search?",
+     "relevant": [{"files": ["decisions.md", "decisions_copy.md"], "contains": "conceptual questions"}]},
+    {"q": "What changed in v3?",
+     "relevant": [{"files": ["architecture_v3.md"], "contains": "reranking stage"}]},
+    {"q": "Which job fails when the table is locked?",
+     "relevant": [{"files": ["incident_log.md"], "contains": "nightly reindex job"}]},
+    {"q": "What happens if vectors come from another encoder?",
+     "relevant": [{"files": ["incident_log.md"], "contains": "different model"}]},
+    {"q": "lock_timeout_ms",
+     "relevant": [{"files": ["incident_log.md"], "contains": "lock_timeout_ms"}]}
+  ],
+  "unanswerable": [
+    {"q": "What is the monthly cloud hosting bill?"},
+    {"q": "Who is the CEO of the company?"},
+    {"q": "Which programming language is the mobile app written in?"},
+    {"q": "What is the weather in Paris today?"},
+    {"q": "What was the customer satisfaction score last quarter?"}
+  ]
+}

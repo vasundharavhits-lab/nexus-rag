@@ -1,0 +1,404 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nexus</title>
+<style>
+:root{--bg:#05080c;--panel:#0e151d;--panel2:#0a1118;--line:#1d2b38;--text:#e8f5fc;--mute:#7e97a8;--blue:#8fdcff;--glow:#b8ecff;--ok:#6ee7b7;--warn:#f5c26b;--bad:#ff8a8a}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.55 "Segoe UI",system-ui,sans-serif;display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+button,select,textarea,input{font:inherit;color:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--glow);outline-offset:2px}
+
+/* top bar */
+header{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line)}
+.brand{font-weight:700;letter-spacing:.45em;font-size:16px}
+.hbtn{background:none;border:1px solid var(--line);color:var(--mute);border-radius:10px;padding:5px 12px;cursor:pointer}
+.hbtn:hover{color:var(--glow);border-color:var(--mute)}
+#set{flex:none;display:none;gap:10px;flex-wrap:wrap;align-items:center;color:var(--mute);font-size:13px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel2)}
+#set.on{display:flex}
+#set label{display:flex;align-items:center;gap:6px}
+#set input,#set select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+#set button{background:var(--panel);border:1px solid var(--line);color:var(--glow);border-radius:8px;padding:5px 10px;cursor:pointer}
+#modelinfo{margin-left:auto}
+
+/* conversation */
+#chat{flex:1;min-height:0;overflow-y:auto;scroll-behavior:smooth}
+.col{width:min(760px,94vw);margin:0 auto;display:flex;flex-direction:column;gap:18px;padding:22px 0 26px}
+.who{font-size:12px;color:var(--mute);margin-bottom:3px}
+.u{align-self:flex-end;max-width:85%}
+.u .who{text-align:right}
+.u .b{background:var(--blue);color:#04121a;border-radius:18px 18px 4px 18px;padding:9px 15px;white-space:pre-wrap;word-break:break-word}
+.a{max-width:100%}
+.a .b{background:var(--panel);border-radius:18px 18px 18px 4px;padding:11px 16px;word-break:break-word}
+.a .b.plain{white-space:pre-wrap}
+.a.refused .b{border-left:3px solid var(--warn)}
+.a.err .b{border-left:3px solid var(--bad)}
+.b p{margin:0 0 .7em}.b p:last-child{margin-bottom:0}
+.b ul,.b ol{margin:0 0 .7em;padding-left:1.4em}.b li{margin:.15em 0}
+.b .h{font-weight:700;margin:.4em 0 .3em}
+.b code{background:#0a1118;border:1px solid var(--line);border-radius:5px;padding:0 5px;font:13px Consolas,monospace}
+.codewrap{position:relative;margin:0 0 .7em}
+.codewrap pre{margin:0;background:#070c11;border:1px solid var(--line);border-radius:10px;padding:12px 14px;overflow-x:auto}
+.codewrap pre code{background:none;border:0;padding:0;font:13px/1.5 Consolas,monospace}
+.copy{position:absolute;top:6px;right:6px;background:var(--panel);border:1px solid var(--line);color:var(--mute);border-radius:6px;padding:1px 8px;font-size:12px;cursor:pointer}
+.sec{margin-top:8px;font-size:13px;color:var(--mute)}
+.badge{display:inline-block;border-radius:999px;padding:1px 10px;font-size:12px;border:1px solid var(--line);margin-right:6px}
+.badge.gen{color:var(--warn);border-color:#4a3d1c}
+.badge.doc{color:var(--ok);border-color:#1d4a3a}
+.chip{display:inline-flex;gap:6px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:4px 8px;margin:3px 6px 3px 0;color:var(--text)}
+.chip button{background:none;border:1px solid var(--line);color:var(--glow);border-radius:6px;padding:1px 7px;cursor:pointer;font-size:12px}
+.pass{display:none;margin-top:6px;background:#080d13;border:1px solid var(--line);border-radius:10px;padding:8px 10px;color:var(--text);white-space:pre-wrap}
+.claim{margin:3px 0}
+.s-supported{color:var(--ok)}.s-wrong_source{color:var(--warn)}.s-unsupported{color:var(--bad)}
+.meta{margin-top:6px;font-size:12px;color:var(--mute)}
+.fb button{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:2px 10px;cursor:pointer;margin-right:6px}
+.dots{color:var(--mute)}
+@media (prefers-reduced-motion:no-preference){.dots{animation:p 1.2s ease-in-out infinite}@keyframes p{50%{opacity:.35}}}
+
+/* empty state */
+.empty{margin:9vh auto 0;text-align:center}
+.empty h2{margin:0 0 6px;font-size:26px;font-weight:600}
+.empty p{margin:0 0 20px;color:var(--mute)}
+.sugg{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.sugg button{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;cursor:pointer;color:var(--text)}
+.sugg button:hover{border-color:var(--blue)}
+
+/* composer pinned to the bottom */
+footer{flex:none;padding:8px 0 calc(10px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 70%,transparent)}
+.composer{width:min(760px,94vw);margin:0 auto;display:flex;align-items:flex-end;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:8px 8px 8px 12px}
+.composer:focus-within{border-color:var(--blue)}
+#q{flex:1;min-width:0;background:none;border:0;outline:0;resize:none;max-height:170px;line-height:1.45;padding:7px 4px}
+.icon{background:none;border:0;color:var(--mute);font-size:19px;cursor:pointer;padding:6px 8px;border-radius:10px}
+.icon:hover{color:var(--glow)}
+#send{background:var(--blue);color:#04121a;font-weight:600;border:0;border-radius:16px;padding:9px 18px;cursor:pointer}
+#send:disabled{opacity:.5;cursor:wait}
+.under{width:min(760px,94vw);margin:6px auto 0;display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--mute);font-size:12px}
+.under select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px 6px;color:var(--text)}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">NEXUS</span>
+  <span>
+    <button class="hbtn" id="newchat" type="button" title="Start a new conversation">New chat</button>
+    <button class="hbtn" id="gear" type="button" title="Settings" aria-label="Settings">&#9881;</button>
+  </span>
+</header>
+
+<div id="set">
+  <label>User <input id="user" value="demo-user" size="12"></label>
+  <label>Workspace <input id="ws" value="demo-workspace" size="18"></label>
+  <label>Document search <select id="mode"><option>auto</option><option>vector</option><option>keyword</option></select></label>
+  <label>Server <input id="base" size="22"></label>
+  <button type="button" id="newws">New workspace</button>
+  <span id="modelinfo"></span>
+</div>
+
+<main id="chat" aria-live="polite"><div class="col" id="col"></div></main>
+
+<footer>
+  <form class="composer" id="form" autocomplete="off">
+    <input type="file" id="file" accept=".md,.pdf,.docx" multiple hidden>
+    <button type="button" class="icon" id="plus" title="Upload files" aria-label="Upload files">&#128206;</button>
+    <textarea id="q" rows="1" placeholder="Message Nexus..." aria-label="Message"></textarea>
+    <button type="submit" id="send">Send</button>
+  </form>
+  <div class="under">
+    <label>Answer from
+      <select id="scope" aria-label="Answer from">
+        <option value="auto">Auto: my documents, then general knowledge</option>
+        <option value="documents">My documents only</option>
+        <option value="general">General chat</option>
+        <option value="guidance">Smart guide (feelings and questions, any PDF)</option>
+      </select>
+    </label>
+    <label>Reply in
+      <select id="alang" aria-label="Reply language">
+        <option value="">Same as my question</option><option>English</option><option>Hindi</option>
+        <option>Hinglish</option><option>Marathi</option><option>Gujarati</option><option>Bengali</option>
+        <option>Tamil</option><option>Telugu</option><option>Spanish</option><option>French</option><option>Arabic</option>
+      </select>
+    </label>
+    <span>Enter to send, Shift+Enter for a new line</span>
+  </div>
+</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const col=$('col');
+let history=[];            // [{role:'user'|'assistant', content}] sent back with each message
+let busy=false;
+
+$('base').value = location.protocol==='file:' ? 'http://127.0.0.1:8000' : location.origin;
+$('gear').onclick=()=>$('set').classList.toggle('on');
+
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+function hdr(){return {'Content-Type':'application/json','X-User-Id':$('user').value.trim()}}
+function api(path,opt){return fetch($('base').value.replace(/\/$/,'')+path,opt)}
+function toEnd(){const c=$('chat');c.scrollTop=c.scrollHeight}
+function clearEmpty(){const e=col.querySelector('.empty');if(e)e.remove()}
+function add(node){clearEmpty();col.append(node);toEnd();return node}
+const sec=x=>x==null?'-':(Math.round(x/100)/10)+' s';
+
+/* ---------- safe mini-Markdown: builds DOM nodes, never inserts HTML ---------- */
+function inline(text,parent){
+  const re=/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g;let last=0,m;
+  while((m=re.exec(text))){
+    if(m.index>last)parent.append(document.createTextNode(text.slice(last,m.index)));
+    const t=m[0];parent.append(t[0]==='`'?el('code',null,t.slice(1,-1)):el('strong',null,t.slice(2,-2)));
+    last=re.lastIndex;
+  }
+  if(last<text.length)parent.append(document.createTextNode(text.slice(last)));
+}
+function codeBlock(body){
+  const w=el('div','codewrap'),pre=el('pre'),code=el('code',null,body);
+  pre.append(code);
+  const b=el('button','copy','Copy');b.type='button';
+  b.onclick=async()=>{try{await navigator.clipboard.writeText(body);b.textContent='Copied'}catch(e){b.textContent='Select and copy'}setTimeout(()=>b.textContent='Copy',1500)};
+  w.append(pre,b);return w;
+}
+function renderMd(src,root){
+  src.split('```').forEach((part,i)=>{
+    if(i%2===1){
+      const nl=part.indexOf('\n');
+      const body=(nl>=0&&/^[\w+#.-]*$/.test(part.slice(0,nl).trim()))?part.slice(nl+1):part;
+      root.append(codeBlock(body.replace(/\n+$/,'')));return;
+    }
+    part.split(/\n{2,}/).forEach(block=>{
+      const lines=block.split('\n').filter(l=>l.trim()!=='');
+      if(!lines.length)return;
+      if(lines.every(l=>/^\s*[-*ΓÇó]\s+/.test(l))){
+        const ul=el('ul');lines.forEach(l=>{const li=el('li');inline(l.replace(/^\s*[-*ΓÇó]\s+/,''),li);ul.append(li)});root.append(ul);
+      }else if(lines.every(l=>/^\s*\d+[.)]\s+/.test(l))){
+        const ol=el('ol');lines.forEach(l=>{const li=el('li');inline(l.replace(/^\s*\d+[.)]\s+/,''),li);ol.append(li)});root.append(ol);
+      }else if(lines.length===1&&/^#{1,6}\s+/.test(lines[0])){
+        const h=el('div','h');inline(lines[0].replace(/^#{1,6}\s+/,''),h);root.append(h);
+      }else{
+        const p=el('p');lines.forEach((l,k)=>{if(k)p.append(el('br'));inline(l,p)});root.append(p);
+      }
+    });
+  });
+}
+
+/* ---------- messages ---------- */
+function userMsg(t){const d=el('div','u');d.append(el('div','who','You'),el('div','b',t));add(d)}
+function info(t){const d=el('div','a');d.append(el('div','who','Nexus'),el('div','b plain',t));add(d);return d}
+function errMsg(t){const d=el('div','a err');d.append(el('div','who','Nexus'),el('div','b plain',t));add(d)}
+
+function feedback(r,d){
+  if(r.saved===false)return;           // an unsaved run has nothing to attach feedback to
+  const fb=el('div','sec fb');
+  const send=async(rating,btn)=>{
+    try{await api('/api/v1/feedback',{method:'POST',headers:hdr(),body:JSON.stringify({run_id:r.run_id,rating,issue_type:'none',comment:''})});fb.textContent='Thanks, feedback saved.'}
+    catch(e){btn.textContent='Failed'}
+  };
+  const up=el('button',null,'Helpful'),down=el('button',null,'Not helpful');
+  up.onclick=()=>send(1,up);down.onclick=()=>send(-1,down);
+  fb.append(up,down);d.append(fb);
+}
+
+function botMsg(r){
+  const general=r.source==='general'||r.status==='general_answer';
+  const d=el('div','a'+(r.status==='insufficient_evidence'?' refused':''));
+  d.append(el('div','who','Nexus'));
+  const b=el('div',general?'b':'b plain');
+  if(general)renderMd(r.answer||'',b);else b.textContent=r.answer;
+  d.append(b);
+
+  if(general){
+    const s=el('div','sec');s.append(el('span','badge gen','General answer'),document.createTextNode(r.note||'Not checked against your documents.'));
+    d.append(s);
+  }else{
+    const label={answered:'Answered with citations',uncited:'Answer has no valid citation',insufficient_evidence:'Not enough evidence in this workspace'}[r.status]||r.status;
+    const s=el('div','sec');s.append(el('span','badge doc','From your documents'),document.createTextNode(label));d.append(s);
+  }
+
+  if(r.citations&&r.citations.length){
+    const s=el('div','sec');
+    r.citations.forEach(c=>{
+      const chip=el('span','chip',`[${c.n}] ${c.filename} (${c.label}) ┬╖ ${c.heading_path}`);
+      const btn=el('button',null,'View passage');btn.type='button';
+      const box=el('div','pass');
+      btn.onclick=async()=>{
+        if(box.style.display==='block'){box.style.display='none';return}
+        box.textContent='Loading...';box.style.display='block';
+        try{const x=await api('/api/v1/chunks/'+c.chunk_id,{headers:hdr()});const j=await x.json();box.textContent=j.text||'Passage not found.'}
+        catch(e){box.textContent='Could not load the passage.'}
+      };
+      chip.append(btn);s.append(chip,box);
+    });
+    d.append(s);
+  }
+
+  if(Array.isArray(r.verification)&&r.verification.length){
+    const s=el('div','sec');s.append(el('div',null,'Claim check'));
+    r.verification.forEach(v=>{
+      const row=el('div','claim');
+      const note=v.verdict==='wrong_source'?` (see source ${v.better_sources.join(', ')})`:'';
+      row.append(el('span','s-'+v.verdict,v.verdict.replace('_',' ')+note+': '),document.createTextNode(v.claim));
+      s.append(row);
+    });
+    d.append(s);
+  }
+
+  const t=r.trace||{};
+  const ms=r.timings_ms?sec(r.timings_ms.total):'';
+  let meta;
+  if(general){meta=`general ┬╖ ${r.model||'model'} ┬╖ ${ms}`}
+  else{
+    const parts=t.retrieve_ms!=null?` (retrieve ${sec(t.retrieve_ms)}, generate ${sec(t.generate_ms)}, verify ${sec(t.verify_ms)})`:'';
+    const dbg=[];
+    if(t.search_query) dbg.push('English query: '+t.search_query);
+    if(t.refused_because) dbg.push('refused because: '+t.refused_because);
+    if(t.support) dbg.push('grounding: '+(t.support.grounding||JSON.stringify(t.support)));
+    if(t.pivot) dbg.push('translation: '+t.pivot);
+    if(t.language_fix) dbg.push('language fix: '+t.language_fix);
+    if(t.language_rejected) dbg.push('rejected text: '+String(t.language_rejected).slice(0,120));
+    meta=`search: ${t.route||'-'} ┬╖ gate ${t.gate_vector_score??'-'} of ${t.gate_threshold??'-'} ┬╖ ${ms}${parts}`+(dbg.length?'\n'+dbg.join(' | '):'');
+  }
+  d.append(el('div','meta',meta));
+  feedback(r,d);
+  add(d);
+}
+
+/* ---------- sending ---------- */
+async function ask(q){
+  if(busy||!q)return;
+  busy=true;$('send').disabled=true;
+  userMsg(q);
+  const wait=el('div','a');const wb=el('div','b dots','Thinking...');wait.append(el('div','who','Nexus'),wb);add(wait);
+  const t0=Date.now();
+  const tick=setInterval(()=>{wb.textContent='Thinking... '+Math.round((Date.now()-t0)/1000)+' s'},1000);
+  const ws=$('ws').value.trim();
+  const body={message:q,scope:$('scope').value,mode:$('mode').value,k:4,history:history.slice(-10)};
+  if($('alang').value)body.answer_lang=$('alang').value;
+  if(ws)body.workspace_id=ws;
+  try{
+    let x=await api('/api/v1/chat',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
+    if([500,502,504].includes(x.status)){await new Promise(r=>setTimeout(r,2500));x=await api('/api/v1/chat',{method:'POST',headers:hdr(),body:JSON.stringify(body)})}
+    clearInterval(tick);wait.remove();
+    if(x.ok){
+      const r=await x.json();
+      botMsg(r);
+      history.push({role:'user',content:q},{role:'assistant',content:r.answer||''});
+      history=history.slice(-20);
+    }else{
+      const j=await x.json().catch(()=>({}));
+      if(x.status===503)errMsg((j.detail||'The language model is not available.')+' Start it, or check LLM settings in the .env file, then ask again.');
+      else if(x.status===404)errMsg('Workspace not found for this user. Open settings (the gear) and check the user and workspace, or switch "Answer from" to General chat.');
+      else if(x.status===429)errMsg('Too many requests right now. Please wait a minute and try again.');
+      else if(x.status===422)errMsg('That message could not be sent. It may be too long (limit 4000 characters).');
+      else errMsg(j.detail||('The server returned an error ('+x.status+'). Please try again.'));
+    }
+  }catch(err){clearInterval(tick);wait.remove();errMsg('Cannot reach the Nexus server. Start it with uvicorn and check the Server address in settings.')}
+  busy=false;$('send').disabled=false;$('q').focus();
+}
+
+const q=$('q');
+function fit(){q.style.height='auto';q.style.height=Math.min(q.scrollHeight,170)+'px'}
+q.addEventListener('input',fit);
+q.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('form').requestSubmit()}
+});
+$('form').onsubmit=e=>{e.preventDefault();const t=q.value.trim();if(!t||busy)return;q.value='';fit();ask(t)};
+
+/* ---------- empty state, new chat ---------- */
+function showEmpty(){
+  const e=el('div','empty');
+  e.append(el('h2',null,'How can I help?'),el('p',null,'Ask anything, or add documents and ask about them.'));
+  const s=el('div','sugg');
+  ['Explain how retrieval-augmented generation works','What changed between versions of my documents?','Help me write a short project summary'].forEach(t=>{
+    const b=el('button',null,t);b.type='button';b.onclick=()=>{q.value=t;fit();q.focus()};s.append(b);
+  });
+  e.append(s);col.append(e);
+}
+$('newchat').onclick=()=>{if(busy)return;history=[];col.textContent='';showEmpty();q.focus()};
+
+/* ---------- settings and uploads (unchanged behaviour) ---------- */
+try{
+  $('ws').value=localStorage.getItem('nx_ws')||$('ws').value;
+  $('user').value=localStorage.getItem('nx_user')||$('user').value;
+  $('scope').value=localStorage.getItem('nx_scope')||'auto';
+}catch(e){}
+$('ws').onchange=()=>{try{localStorage.setItem('nx_ws',$('ws').value.trim())}catch(e){}};
+$('user').onchange=()=>{try{localStorage.setItem('nx_user',$('user').value.trim())}catch(e){}};
+$('scope').onchange=()=>{try{localStorage.setItem('nx_scope',$('scope').value)}catch(e){}};
+$('plus').onclick=()=>$('file').click();
+
+async function createWorkspace(){
+  const x=await api('/api/v1/workspaces',{method:'POST',headers:hdr(),body:JSON.stringify({name:'My documents'})});
+  if(!x.ok)throw new Error(x.status);
+  const j=await x.json();
+  $('ws').value=j.workspace_id;
+  try{localStorage.setItem('nx_ws',j.workspace_id)}catch(e){}
+  return j.workspace_id;
+}
+$('newws').onclick=async()=>{
+  try{await createWorkspace();info('New empty workspace created for user "'+$('user').value.trim()+'". Click the paperclip to add your files, then ask questions about them.')}
+  catch(e){errMsg('Could not create a workspace. Is the server running?')}
+};
+
+async function waitJob(id,user,onMsg){
+  let fails=0;
+  for(;;){
+    await new Promise(r=>setTimeout(r,1500));
+    try{
+      const x=await api('/api/v1/jobs/'+encodeURIComponent(id),{headers:{'X-User-Id':user}});
+      if(x.status===404)return{state:'failed',error:'The server was restarted while this file was being processed. Please upload it again.'};
+      const j=await x.json();fails=0;
+      onMsg(j.message||j.stage||'Working');
+      if(j.state==='done'||j.state==='failed')return j;
+    }catch(e){if(++fails>20)return{state:'failed',error:'Lost the connection to the server.'}}
+  }
+}
+
+$('file').onchange=async()=>{
+  const files=Array.from($('file').files);
+  $('file').value='';
+  if(!files.length)return;
+  const user=$('user').value.trim();
+  const note=info('Uploading '+files.length+' file(s)...');
+  const setNote=t=>{note.querySelector('.b').textContent=t};
+  let ws=$('ws').value.trim();
+  try{if(!ws)ws=await createWorkspace()}catch(e){note.remove();errMsg('Could not create a workspace for your files. Is the server running?');return}
+  let lim={};
+  try{const lx=await api('/api/v1/limits');if(lx.ok)lim=await lx.json()}catch(e){}      // limits come from the server, not from this page
+  let ok=0;
+  for(let n=0;n<files.length;n++){
+    const f=files[n],tag=files.length>1?' ('+(n+1)+'/'+files.length+')':'',mb=f.size/1048576;
+    try{
+      if(lim.max_upload_mb>0&&mb>lim.max_upload_mb){errMsg(f.name+' is '+mb.toFixed(0)+' MB. This server accepts up to '+lim.max_upload_mb+' MB (MAX_UPLOAD_MB in the .env file; 0 means no limit).');continue}
+      setNote('Uploading '+f.name+tag+' ('+mb.toFixed(1)+' MB)...');
+      const fd=new FormData();fd.append('file',f);
+      const x=await api('/api/v1/documents/upload?background=true&workspace_id='+encodeURIComponent(ws),{method:'POST',headers:{'X-User-Id':user},body:fd});
+      const j=await x.json().catch(()=>({}));
+      if(x.status===202){
+        const r=await waitJob(j.job_id,user,m=>setNote(f.name+tag+': '+m));
+        if(r.state==='done'&&r.result&&r.result.status==='ok'){ok++}
+        else if(r.state==='done'){errMsg(f.name+': '+(r.error||r.message||'no text could be read from it.'))}
+        else{errMsg(f.name+': '+(r.error||'processing failed. Check the server window for details.'))}
+      }
+      else if(x.status===415){errMsg(f.name+': this file type is not supported. Supported: '+((lim.supported||[]).join(', ')||'see the server')+'.')}
+      else if(x.status===413){errMsg(f.name+': '+(j.detail||'file is too large')+'. Raise MAX_UPLOAD_MB in the .env file (0 = no limit) and restart the server.')}
+      else if(x.status===404){errMsg('Workspace not found for this user. Check the user and workspace in settings.')}
+      else{errMsg(f.name+': upload failed ('+x.status+').')}
+    }catch(e){errMsg(f.name+': could not reach the server.')}
+  }
+  if(!ok){note.remove();return}
+  setNote(ok+' file(s) added and indexed. You can ask questions about them now.');
+};
+
+(async()=>{try{const x=await api('/api/v1/limits');if(x.ok){const j=await x.json();if(j.supported&&j.supported.length)$('file').accept=j.supported.join(',')}}catch(e){}})();      // accepted types come from the server
+(async()=>{try{const x=await api('/api/v1/model');if(x.ok){const j=await x.json();$('modelinfo').textContent='Model: '+j.chat_model+' ('+j.provider+')'}}catch(e){}})();
+(async()=>{try{const x=await api('/api/v1/status');if(!x.ok)return;const j=await x.json();const w=[];
+  if(j.llm&&!j.llm.ok)w.push('The language model is not reachable: '+j.llm.message);
+  if(j.ocr&&!j.ocr.available)w.push('Scanned pages cannot be read yet: '+j.ocr.reason);
+  else if(j.ocr&&j.ocr.missing&&j.ocr.missing.length)w.push('Install Tesseract language data for: '+j.ocr.missing.join(', ')+' to read those scans.');
+  if(w.length)info(w.join('\n'))}catch(e){}})();
+showEmpty();
+</script>
+</body>
+</html>
